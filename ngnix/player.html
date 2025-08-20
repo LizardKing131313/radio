@@ -1,0 +1,94 @@
+sudo tee /var/www/html/player.html >/dev/null <<'HTML'
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta content="width=device-width,initial-scale=1" name="viewport">
+<title>Говновоз Радио — Player</title>
+<style>
+  :root {
+    color-scheme: dark light
+  }
+
+  body {
+    margin: 0;
+    background: #0b0b0b;
+    color: #ddd;
+    font: 16px/1.5 system-ui
+  }
+
+  main {
+    max-width: 720px;
+    margin: 24px auto;
+    padding: 16px
+  }
+
+  h1 {
+    margin: .2rem 0 1rem
+  }
+
+  audio {
+    width: 100%
+  }
+
+  button {
+    margin: 12px 6px 0 0;
+    padding: 12px 16px;
+    border: 0;
+    border-radius: 10px
+  }
+
+  #log {
+    white-space: pre-wrap;
+    font-size: 14px;
+    color: #bbb;
+    margin-top: 10px
+  }
+</style>
+<main>
+  <h1>Говновоз Радио — HLS (fMP4)</h1>
+  <audio controls id="a" playsinline></audio>
+  <div>
+    <button id="play">▶️ Играть</button>
+    <button id="mute">🔇/🔊</button>
+  </div>
+  <div id="log"></div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.14/dist/hls.min.js"></script>
+<script>
+  const src = location.origin + '/live/playlist.m3u8';
+  const a = document.getElementById('a');
+  const log = (...x) => {
+    document.getElementById('log').textContent = x.join(' ')
+  };
+
+  function start() {
+    log('Стартуем: ' + src);
+    if (a.canPlayType('application/vnd.apple.mpegurl')) {
+      a.src = src;
+      a.play().catch(e => log('autoplay fail: ' + (e?.message || e)));
+    } else if (window.Hls && Hls.isSupported()) {
+      const hls = new Hls({
+        lowLatencyMode: false,
+        maxLiveSyncPlaybackRate: 1.0,
+        backBufferLength: 60,
+        fragLoadingTimeOut: 20000,
+        maxBufferLength: 30,
+      });
+      hls.loadSource(src);
+      hls.attachMedia(a);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => a.play().catch(e => log('autoplay fail: ' + (e?.message || e))));
+      hls.on(Hls.Events.ERROR, (_, d) => log('HLS error: ' + (d?.details || d?.type || 'unknown')));
+    } else {
+      log('Браузер без поддержки HLS/MSE. Поставь VLC.');
+    }
+  }
+
+  document.getElementById('play').onclick = () => {
+    a.muted = false;
+    start();
+  };
+  document.getElementById('mute').onclick = () => {
+    a.muted = !a.muted;
+  };
+</script>
+HTML
