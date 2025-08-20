@@ -1,0 +1,62 @@
+name: Qodana
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [ "**" ]
+
+concurrency:
+  group: qodana-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qodana:
+    name: Qodana scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      checks: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Qodana Scan
+        uses: JetBrains/qodana-action@v2025.2
+        env:
+          QODANA_TOKEN: ${{ secrets.QODANA_TOKEN }}
+        with:
+          results-dir: qodana
+          upload-result: true
+          use-caches: true
+          use-annotations: true
+          post-pr-comment: true
+          pr-mode: ${{ github.event_name == 'pull_request' }}
+          args: --fail-threshold=0
+
+      - name: Upload SARIF to GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: qodana/results/qodana.sarif
+          category: qodana
+
+      - name: Fail if HIGH findings exist
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y jq
+          FILE=$(ls -1 qodana/**/*.sarif* 2>/dev/null | head -n1)
+          if [ -z "$FILE" ]; then echo 'No SARIF found'; exit 0; fi
+          HIGH=$(jq '[.runs[].results[] | select(.level=="error")] | length' "$FILE")
+          echo "Qodana HIGH findings: $HIGH"
+          if [ "$HIGH" -gt 0 ]; then echo "::error::Failing due to HIGH findings"; exit 1; fi
+
+      - name: Upload raw Qodana artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qodana-results
+          path: qodana
+          retention-days: 7

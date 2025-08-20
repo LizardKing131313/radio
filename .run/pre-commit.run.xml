@@ -1,0 +1,11 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="pre-commit" type="BatchConfigurationType" factoryName="Batch">
+    <module name="tg-bots-portfolio-starter"/>
+    <option name="INTERPRETER_OPTIONS" value=""/>
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$"/>
+    <option name="PARENT_ENVS" value="true"/>
+    <option name="SCRIPT_NAME" value="./.venv/Scripts/pre-commit.exe"/>
+    <option name="PARAMETERS" value="run --files $ChangedFiles$"/>
+    <method v="2"/>
+  </configuration>
+</component>

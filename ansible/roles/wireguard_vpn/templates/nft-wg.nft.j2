@@ -1,0 +1,22 @@
+# Managed by Ansible — WireGuard minimal rules
+table inet wg {
+chain wg_input {
+type filter hook input priority 0;
+{% if wg_open_port %}
+  udp dport {{ wg_listen_port }} accept
+{% endif %}
+}
+
+chain wg_forward {
+type filter hook forward priority 0;
+iif "{{ wg_iface }}" accept
+oif "{{ wg_iface }}" accept
+}
+
+chain wg_postrouting {
+type nat hook postrouting priority 100;
+{% if wg_enable_nat %}
+  ip saddr {{ wg_network_cidr }} oif "{{ wg_nat_out_iface }}" masquerade
+{% endif %}
+}
+}

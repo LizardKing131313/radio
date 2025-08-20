@@ -1,0 +1,9 @@
+---
+root_ssh_key_files:
+  - "~/.ssh/id_ed25519.pub"
+
+ansible_connection: paramiko
+
+ssh_ports:
+  - 22
+  - 443

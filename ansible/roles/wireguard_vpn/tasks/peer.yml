@@ -1,0 +1,78 @@
+# читаем приватный/публичный
+- name: Slurp peer private key
+  ansible.builtin.slurp:
+    path: "{{ wg_clients_dir }}/{{ peer.name }}/private.key"
+  register: _peer_priv
+  changed_when: false
+
+- name: Slurp peer public key
+  ansible.builtin.slurp:
+    path: "{{ wg_clients_dir }}/{{ peer.name }}/public.key"
+  register: _peer_pub
+  changed_when: false
+
+# читаем PSK только если он включён для этого пира
+- name: Slurp preshared key if exists
+  ansible.builtin.slurp:
+    path: "{{ wg_clients_dir }}/{{ peer.name }}/preshared.key"
+  register: _peer_psk_slurp
+  changed_when: false
+  failed_when: false
+  when: peer.preshared | default(false)
+
+# соберём локальные переменные
+- name: Build peer key vars
+  ansible.builtin.set_fact:
+    _peer_private: "{{ _peer_priv.content | b64decode | trim }}"
+    _peer_public: "{{ _peer_pub.content  | b64decode | trim }}"
+    _peer_psk_val: "{{ (_peer_psk_slurp.content | b64decode | trim) if (peer.preshared | default(false)) else omit }}"
+    _peer_use_psk: "{{ peer.preshared | default(false) }}"
+  changed_when: false
+
+# рендер клиента
+- name: Template client config (on server)
+  ansible.builtin.template:
+    src: "client.conf.j2"
+    dest: "{{ wg_clients_dir }}/{{ peer.name }}/{{ peer.name }}.conf"
+    owner: root
+    group: root
+    mode: "0600"
+  vars:
+    peer_name: "{{ peer.name }}"
+    peer_address: "{{ peer.address }}"
+    peer_dns: "{{ peer.dns | default([]) }}"
+    peer_keepalive: "{{ peer.keepalive | default(omit) }}"
+    peer_private_key: "{{ _peer_private }}"
+    peer_use_psk: "{{ _peer_use_psk }}"
+    peer_preshared_key: "{{ _peer_psk_val | default('') }}"
+    peer_allowed_ips_client: "{{ peer.allowed_ips_client | default(wg_allowed_ips_default) }}"
+
+# экспорт + QR (как было)
+- name: Export client config
+  ansible.builtin.copy:
+    src: "{{ wg_clients_dir }}/{{ peer.name }}/{{ peer.name }}.conf"
+    dest: "{{ wg_clients_export_dir }}/{{ peer.name }}.conf"
+    owner: root
+    group: root
+    mode: "0600"
+    remote_src: true
+
+- name: Generate QR (PNG)
+  ansible.builtin.command:
+    cmd: "qrencode -t PNG -o '{{ wg_clients_export_dir }}/{{ peer.name }}.png' -r '{{ wg_clients_export_dir }}/{{ peer.name }}.conf'"
+  when: wg_install_qrencode
+  changed_when: true
+
+# аккумулируем для серверного wg.conf
+- name: Accumulate server peer (for wg.conf)
+  ansible.builtin.set_fact:
+    wg_server_peers: >-
+      {{
+        (wg_server_peers | default([])) + [ {
+          'name': peer.name,
+          'address': peer.address,
+          'public_key': _peer_public,
+          'preshared_key': (_peer_use_psk | ternary(_peer_psk_val, omit)),
+          'keepalive': peer.keepalive | default(omit)
+        } ]
+      }}

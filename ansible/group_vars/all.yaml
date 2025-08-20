@@ -1,0 +1,41 @@
+---
+root_ssh_key_files:
+  - "~/.ssh/id_ed25519.pub"
+
+# === SSH ===
+ssh_port: 22
+
+# === UFW ===
+ufw_allow_tcp_ports:
+  - "{{ ssh_port }}"
+#  - 80
+#  - 443
+#  - 8000    # Icecast
+#  - 1935    # RTMP
+
+# === fail2ban
+fail2ban_bantime: "15m"
+fail2ban_findtime: "10m"
+fail2ban_maxretry: 10
+fail2ban_ignoreip:
+  - "127.0.0.1/8"
+  - "::1"
+
+# === Users ===
+users_enabled: true
+users_list:
+  - name: radio
+    shell: /bin/bash
+    state: present
+    sudo_nopasswd: true
+    ssh_key_files:
+      - "~/.ssh/id_ed25519.pub"
+    # ssh_keys: []
+
+# === Packages ===
+packages_enabled: true
+packages_list:
+  - ffmpeg
+  - yt-dlp
+  - icecast2
+  - curl

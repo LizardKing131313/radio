@@ -1,0 +1,39 @@
+---
+wg_iface: "wg0"
+wg_cidr: "10.7.0.1/24"                  # адрес сервера в подсети WG
+wg_listen_port: 51820
+
+# firewall: auto попробует nftables, иначе iptables. none — вообще не трогаем
+wg_firewall_backend: "auto"             # auto|nftables|iptables|none
+wg_enable_nat: true
+wg_nat_out_iface: "{{ ansible_default_ipv4.interface | default('eth0') }}"
+wg_open_port: true                      # открыть UDP-порт WG (iptables/nft)
+
+wg_enable_ipv6: false
+wg_allowed_ips_default: "0.0.0.0/0, ::/0"
+
+wg_state_dir: "/etc/wireguard"
+wg_key_dir: "{{ wg_state_dir }}"
+wg_server_private_key_path: "{{ wg_key_dir }}/{{ wg_iface }}.key"
+wg_server_public_key_path: "{{ wg_key_dir }}/{{ wg_iface }}.pub"
+wg_sysctl_dropin: "/etc/sysctl.d/99-wireguard-forward.conf"
+
+wg_clients_dir: "{{ wg_state_dir }}/clients"
+wg_clients_export_dir: "/root/wg-clients-export"  # не веб‑доступно
+wg_install_qrencode: true
+
+# Хост/IP для Endpoint в клиентских конфигах.
+# Если пусто, возьмём ansible_host или ansible_default_ipv4.address
+wg_endpoint_host: ""
+
+# Список клиентов (пиров) — автоген ключей/конфигов/QR
+# - name: "phone"
+#   address: "10.7.0.2/32"
+#   preshared: false
+#   dns: ["1.1.1.1", "1.0.0.1"]
+#   keepalive: 25
+#   allowed_ips_client: "0.0.0.0/0, ::/0"
+wg_peers: [ ]
+
+# Не трогаем пакеты по умолчанию; в роли удаления можно включить
+wg_purge_packages: false

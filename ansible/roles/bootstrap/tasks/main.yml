@@ -1,0 +1,143 @@
+---
+# tags: bootstrap
+- name: Ensure apt exists (Debian/Ubuntu)
+  ansible.builtin.raw: "/usr/bin/test -x /usr/bin/apt-get; echo RC:$?"
+  register: apt_exists
+  changed_when: false
+  failed_when: false
+  tags: [ bootstrap ]
+
+- name: Show probe result
+  ansible.builtin.debug:
+    var: apt_exists.stdout
+
+- name: Ensure Python3 installed (so Ansible modules can run)
+  ansible.builtin.raw: |
+    if ! command -v python3 >/dev/null 2>&1; then
+      export DEBIAN_FRONTEND=noninteractive
+      /usr/bin/apt-get update -y
+      /usr/bin/apt-get install -y --no-install-recommends python3
+    fi
+  register: py_install
+  changed_when: false
+  failed_when: py_install.rc not in [0]
+  tags: [ bootstrap ]
+
+- name: Reset SSH connection to switch to Python3
+  ansible.builtin.meta: reset_connection
+  tags: [ bootstrap ]
+
+- name: Gather facts
+  ansible.builtin.setup:
+  tags: [ bootstrap ]
+
+# APT maintenance (noninteractive, keep existing conf files)
+- name: Update package cache
+  ansible.builtin.apt:
+    update_cache: true
+  environment:
+    DEBIAN_FRONTEND: "noninteractive"
+  when: ansible_facts['os_family'] == 'Debian'
+  tags: [ bootstrap, apt ]
+
+- name: Dist-upgrade (keep existing config files)
+  ansible.builtin.apt:
+    upgrade: dist
+    dpkg_options:
+      - "force-confdef"
+      - "force-confold"
+  environment:
+    DEBIAN_FRONTEND: "noninteractive"
+  when: ansible_facts['os_family'] == 'Debian'
+  tags: [ bootstrap, apt ]
+
+- name: Autoremove unused packages
+  ansible.builtin.apt:
+    autoremove: true
+  environment:
+    DEBIAN_FRONTEND: "noninteractive"
+  when: ansible_facts['os_family'] == 'Debian'
+  tags: [ bootstrap, apt ]
+
+# Root SSH authorized_keys management
+- name: "Root | Ensure ~/.ssh exists"
+  ansible.builtin.file:
+    path: /root/.ssh
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  tags: [ bootstrap, ssh ]
+
+- name: "Root | Add public keys"
+  ansible.builtin.authorized_key:
+    user: root
+    state: present
+    key: "{{ lookup('file', item) }}"
+    manage_dir: false
+  loop: "{{ root_ssh_key_files | default([]) }}"
+  when: root_ssh_key_files | default([]) | length > 0
+  tags: [ bootstrap, ssh ]
+
+# Firewall (UFW)
+- name: Ensure UFW installed
+  ansible.builtin.package:
+    name: ufw
+    state: present
+  tags: [ bootstrap, firewall ]
+
+- name: Allow OpenSSH in UFW
+  community.general.ufw:
+    rule: allow
+    name: OpenSSH
+  tags: [ bootstrap, firewall ]
+
+- name: Allow SSH ports in UFW (variable-driven)
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop: "{{ ssh_ports | default([22]) }}"
+  tags: [ bootstrap, firewall ]
+
+- name: Allow project TCP ports in UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ item | string }}"
+    proto: tcp
+  loop: "{{ ufw_allow_tcp_ports | default([]) }}"
+  tags: [ bootstrap, firewall ]
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
+  tags: [ bootstrap, firewall ]
+
+# Fail2ban
+- name: Ensure fail2ban installed
+  ansible.builtin.package:
+    name: fail2ban
+    state: present
+  tags: [ bootstrap, fail2ban ]
+
+- name: Deploy /etc/fail2ban/jail.local
+  ansible.builtin.template:
+    src: jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart fail2ban
+  tags: [ bootstrap, fail2ban ]
+
+# SSHD (strict policy + port)
+- name: Deploy sshd_config (strict keys-only policy)
+  ansible.builtin.template:
+    src: sshd_config.j2
+    dest: /etc/ssh/sshd_config
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "sshd -t -f %s"
+  notify: Reload sshd
+  tags: [ bootstrap, ssh ]

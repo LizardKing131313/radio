@@ -1,0 +1,15 @@
+[Interface]
+Address = {{ wg_cidr }}
+ListenPort = {{ wg_listen_port }}
+PrivateKey = {{ wg_server_private_key }}
+{% for p in wg_server_peers %}
+  [Peer]
+  PublicKey = {{ p.public_key }}
+  {% if p.preshared_key is defined %}
+    PresharedKey = {{ p.preshared_key }}
+  {% endif %}
+  AllowedIPs = {{ p.address }}
+  {% if p.keepalive is defined %}
+    PersistentKeepalive = {{ p.keepalive }}
+  {% endif %}
+{% endfor %}

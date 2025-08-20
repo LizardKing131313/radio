@@ -1,0 +1,6 @@
+---
+wg_iface: "wg0"
+wg_firewall_backend: "auto"
+wg_remove_keep_keys: false
+wg_remove_export: true
+wg_purge_packages: true

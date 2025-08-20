@@ -1,0 +1,14 @@
+---
+wg_nat_out_iface: "eth0"         # смотри ip route show default
+wg_endpoint_host: "5.45.94.101"  # или твой домен
+wg_listen_port: 51820
+wg_peers:
+  - name: "phone"
+    address: "10.7.0.2/32"
+    dns: [ "1.1.1.1", "1.0.0.1" ]
+    keepalive: 25
+  - name: "pc"
+    address: "10.7.0.3/32"
+    preshared: true
+    dns: [ "9.9.9.9" ]
+    keepalive: 25

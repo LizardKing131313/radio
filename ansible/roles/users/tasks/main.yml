@@ -1,0 +1,58 @@
+---
+# tags: users
+- name: "Users | Ensure accounts"
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    state: "{{ item.state | default('present') }}"
+    shell: "{{ item.shell | default('/bin/bash') }}"
+    create_home: true
+  loop: "{{ users_list | default([]) }}"
+  when: users_enabled | default(true)
+  tags: [ users ]
+
+- name: "Users | Ensure .ssh directory"
+  ansible.builtin.file:
+    path: "/home/{{ item.name }}/.ssh"
+    state: directory
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0700"
+  loop: "{{ users_list | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: users_enabled | default(true)
+  tags: [ users ]
+
+- name: "Users | Authorized keys from inline list"
+  ansible.builtin.authorized_key:
+    user: "{{ item.0.name }}"
+    key: "{{ item.1 }}"
+    state: present
+    manage_dir: false
+  loop: "{{ users_list | default([]) | subelements('ssh_keys', skip_missing=True) }}"
+  loop_control:
+    label: "{{ item.0.name }}: inline key"
+  when: users_enabled | default(true)
+  tags: [ users ]
+
+- name: "Users | Authorized keys from files"
+  ansible.builtin.authorized_key:
+    user: "{{ item.0.name }}"
+    key: "{{ lookup('file', item.1) }}"
+    state: present
+    manage_dir: false
+  loop: "{{ users_list | default([]) | subelements('ssh_key_files', skip_missing=True) }}"
+  loop_control:
+    label: "{{ item.0.name }}: file {{ item.1 }}"
+  when: users_enabled | default(true)
+  tags: [ users ]
+
+- name: "Users | sudo NOPASSWD"
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/{{ item.name }}"
+    mode: "0440"
+    content: "{{ item.name }} ALL=(ALL) NOPASSWD:ALL"
+    validate: "visudo -cf %s"
+  loop: "{{ users_list | default([]) | selectattr('sudo_nopasswd', 'defined') | selectattr('sudo_nopasswd') | list }}"
+  when: users_enabled | default(true)
+  tags: [ users ]

@@ -1,0 +1,22 @@
+---
+# Radio playbook
+- hosts: vps_root
+  gather_facts: false
+  become: false
+  roles:
+    - bootstrap    # security / updates / ufw / fail2ban/ sshd
+    - users        # create user radio + keys + sudo NOPASSWD
+
+- hosts: vps_radio
+  become: true
+  roles:
+    - packages     # base project packages
+    # - icecast    # TODO: later
+    # - streamer   # TODO: later
+    # - all future project deploys
+
+- hosts: vps_vpn
+  become: true
+  roles:
+    - role: wireguard_vpn
+      tags: [ vpn ]

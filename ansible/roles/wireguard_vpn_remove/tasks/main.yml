@@ -1,0 +1,141 @@
+---
+- name: Include OS vars
+  ansible.builtin.include_vars:
+    file: "{{ item }}"
+  with_first_found:
+    - files:
+        - "{{ ansible_distribution }}.yml"
+        - "{{ ansible_os_family }}.yml"
+        - "Debian.yml"
+      paths:
+        - "{{ role_path | dirname }}/wireguard_vpn/vars"
+
+- name: Stop and disable wg-quick
+  ansible.builtin.systemd:
+    name: "wg-quick@{{ wg_iface }}"
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Remove server config
+  ansible.builtin.file:
+    path: "{{ wg_state_dir }}/{{ wg_iface }}.conf"
+    state: absent
+
+- name: Remove sysctl drop-in
+  ansible.builtin.file:
+    path: "{{ wg_sysctl_dropin }}"
+    state: absent
+
+- name: Re-load sysctl from disk
+  ansible.builtin.command:
+    cmd: "sysctl --system"
+  changed_when: true
+
+# Detect nft
+- name: Detect nftables availability
+  ansible.builtin.command: "nft --version"
+  register: nft_check
+  changed_when: false
+  failed_when: false
+  when: wg_firewall_backend in ['auto', 'nftables']
+
+- name: Decide firewall backend
+  ansible.builtin.set_fact:
+    use_nftables: "{{ (wg_firewall_backend == 'nftables') or (wg_firewall_backend == 'auto' and nft_check.rc == 0) }}"
+    use_iptables: "{{ (wg_firewall_backend == 'iptables') or (wg_firewall_backend == 'auto' and nft_check.rc != 0) }}"
+  when: wg_firewall_backend != 'none'
+
+# nftables cleanup
+- name: Remove nft drop-in rules
+  ansible.builtin.file:
+    path: "/etc/nftables.d/wireguard-ansible.nft"
+    state: absent
+  notify: reload nftables
+  when: use_nftables | default(false)
+
+# iptables cleanup (must mirror creation)
+- name: Compute WG network CIDR (network/prefix)
+  ansible.builtin.set_fact:
+    wg_network_cidr: "{{ wg_cidr | ansible.utils.ipaddr('network/prefix') }}"
+  when: use_iptables | default(false)
+
+- name: Remove UDP input allow (iptables)
+  community.general.iptables:
+    chain: INPUT
+    protocol: udp
+    destination_port: "{{ wg_listen_port }}"
+    jump: ACCEPT
+    comment: "ansible-wireguard"
+    state: absent
+  when: use_iptables | default(false)
+
+- name: Remove forward WG -> OUT (iptables)
+  community.general.iptables:
+    chain: FORWARD
+    in_interface: "{{ wg_iface }}"
+    out_interface: "{{ wg_nat_out_iface }}"
+    source: "{{ wg_network_cidr }}"
+    jump: ACCEPT
+    comment: "ansible-wireguard"
+    state: absent
+  when: use_iptables | default(false)
+
+- name: Remove forward OUT -> WG (iptables)
+  community.general.iptables:
+    chain: FORWARD
+    in_interface: "{{ wg_nat_out_iface }}"
+    out_interface: "{{ wg_iface }}"
+    destination: "{{ wg_network_cidr }}"
+    match: conntrack
+    ctstate: "RELATED,ESTABLISHED"
+    jump: ACCEPT
+    comment: "ansible-wireguard"
+    state: absent
+  when: use_iptables | default(false)
+
+- name: Remove NAT MASQUERADE (iptables)
+  community.general.iptables:
+    table: nat
+    chain: POSTROUTING
+    source: "{{ wg_network_cidr }}"
+    out_interface: "{{ wg_nat_out_iface }}"
+    jump: MASQUERADE
+    comment: "ansible-wireguard"
+    state: absent
+  when: use_iptables | default(false)
+
+# Keys cleanup (optional)
+- name: Remove server keys
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ wg_server_private_key_path }}"
+    - "{{ wg_server_public_key_path }}"
+  when: not wg_remove_keep_keys | default(true)
+
+- name: Remove clients dir
+  ansible.builtin.file:
+    path: "{{ wg_clients_dir }}"
+    state: absent
+  when: not wg_remove_keep_keys | default(true)
+
+# Export dir (оставим по умолчанию)
+- name: Keep export dir (noop)
+  ansible.builtin.debug:
+    msg: "Keeping {{ wg_clients_export_dir }} (set wg_remove_export=true to remove)"
+  when: not (wg_remove_export | default(false))
+
+- name: Remove export dir (optional)
+  ansible.builtin.file:
+    path: "{{ wg_clients_export_dir }}"
+    state: absent
+  when: wg_remove_export | default(false)
+
+# Optionally purge packages
+- name: Purge packages
+  ansible.builtin.package:
+    name: "{{ wg_packages }}"
+    state: absent
+  when: wg_purge_packages | default(false)

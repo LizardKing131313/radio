@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  author: "lizardking131313@gmail.com"
+  description: "WireGuard VPN (server + client configs + QR), NAT via nftables/iptables, safe for existing VPS."
+  license: "MIT"
+  min_ansible_version: "2.13"
+dependencies: [ ]

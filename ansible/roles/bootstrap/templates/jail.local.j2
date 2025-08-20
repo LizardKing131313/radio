@@ -1,0 +1,11 @@
+[DEFAULT]
+bantime  = {{ fail2ban_bantime  | default('15m') }}
+findtime = {{ fail2ban_findtime | default('10m') }}
+maxretry = {{ fail2ban_maxretry | default(10) }}
+ignoreip = {{ (fail2ban_ignoreip | default(['127.0.0.1/8','::1'])) | join(' ') }}
+
+[sshd]
+enabled = true
+port    = ssh
+logpath = %(sshd_log)s
+backend = systemd

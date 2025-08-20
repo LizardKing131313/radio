@@ -1,0 +1,164 @@
+---
+- name: Include OS vars
+  ansible.builtin.include_vars:
+    file: "{{ item }}"
+  with_first_found:
+    - files:
+        - "{{ ansible_distribution }}.yml"
+        - "{{ ansible_os_family }}.yml"
+        - "Debian.yml"
+      paths:
+        - "{{ role_path }}/vars"
+
+- name: Install packages
+  ansible.builtin.package:
+    name: "{{ wg_packages | default(['wireguard', 'wireguard-tools']) }}"
+    state: present
+
+- name: Ensure dirs exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0700"
+  loop:
+    - "{{ wg_state_dir }}"
+    - "{{ wg_clients_dir }}"
+    - "{{ wg_clients_export_dir }}"
+
+# ---------- Server keys ----------
+- name: Check server private key
+  ansible.builtin.stat:
+    path: "{{ wg_server_private_key_path }}"
+  register: srv_priv_stat
+
+- name: Check server public key
+  ansible.builtin.stat:
+    path: "{{ wg_server_public_key_path }}"
+  register: srv_pub_stat
+
+- name: Generate server private key
+  ansible.builtin.shell: "umask 077 && wg genkey > {{ wg_server_private_key_path }}"
+  when: not srv_priv_stat.stat.exists | default(false)
+  changed_when: true
+
+- name: Generate server public key from private
+  ansible.builtin.shell: "wg pubkey < {{ wg_server_private_key_path }} > {{ wg_server_public_key_path }}"
+  when: not srv_pub_stat.stat.exists | default(false)
+  changed_when: true
+
+- name: Read server private key
+  ansible.builtin.slurp:
+    path: "{{ wg_server_private_key_path }}"
+  register: srv_priv_slurp
+
+- name: Read server public key
+  ansible.builtin.slurp:
+    path: "{{ wg_server_public_key_path }}"
+  register: srv_pub_slurp
+
+- name: Set server key facts
+  ansible.builtin.set_fact:
+    wg_server_private_key: "{{ srv_priv_slurp.content | b64decode | trim }}"
+    wg_server_public_key: "{{ srv_pub_slurp.content | b64decode | trim }}"
+
+# ---------- Endpoint ----------
+- name: Decide endpoint host
+  ansible.builtin.set_fact:
+    wg_endpoint_effective: >-
+      {{ (wg_endpoint_host | length > 0)
+          | ternary(wg_endpoint_host,
+                    (ansible_host | default(ansible_default_ipv4.address))) }}
+
+# ---------- Prepare peers list for server config ----------
+- name: Init server peers accumulator
+  ansible.builtin.set_fact:
+    wg_server_peers: [ ]
+
+# ---------- Per-peer: keys, client conf, QR, accumulate server peers ----------
+- name: Ensure peer dir exists
+  ansible.builtin.file:
+    path: "{{ wg_clients_dir }}/{{ item.name }}"
+    state: directory
+    mode: "0700"
+  loop: "{{ wg_peers }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Check peer keys
+  ansible.builtin.stat:
+    path: "{{ wg_clients_dir }}/{{ item.name }}/private.key"
+  register: peer_priv_stat
+  loop: "{{ wg_peers }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: false
+
+- name: Generate peer private key if missing
+  ansible.builtin.shell: "umask 077 && wg genkey > '{{ wg_clients_dir }}/{{ item.name }}/private.key'"
+  when: not (peer_priv_stat.results[loop.index0].stat.exists | default(false))
+  loop: "{{ wg_peers }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Generate peer public key from private
+  ansible.builtin.shell: "wg pubkey < '{{ wg_clients_dir }}/{{ item.name }}/private.key' > '{{ wg_clients_dir }}/{{ item.name }}/public.key'"
+  loop: "{{ wg_peers }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: false
+
+- name: Generate preshared key if requested
+  ansible.builtin.shell: "umask 077 && wg genpsk > '{{ wg_clients_dir }}/{{ item.name }}/preshared.key'"
+  when: item.preshared | default(false)
+  loop: "{{ wg_peers }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: true
+
+- name: Render client configs & accumulate server peers
+  ansible.builtin.include_tasks:
+    file: peer.yml
+  loop: "{{ wg_peers }}"
+  loop_control:
+    loop_var: peer
+    label: "{{ peer.name }}"
+
+# ---------- Sysctl ----------
+- name: Enable IPv4 forwarding via drop-in
+  ansible.posix.sysctl:
+    name: "net.ipv4.ip_forward"
+    value: "1"
+    state: present
+    sysctl_set: true
+    sysctl_file: "{{ wg_sysctl_dropin }}"
+
+- name: Enable IPv6 forwarding via drop-in
+  ansible.posix.sysctl:
+    name: "net.ipv6.conf.all.forwarding"
+    value: "1"
+    state: present
+    sysctl_set: true
+    sysctl_file: "{{ wg_sysctl_dropin }}"
+  when: wg_enable_ipv6
+
+# ---------- Firewall ----------
+- name: Configure firewall/NAT for WireGuard
+  ansible.builtin.include_tasks: firewall.yml
+  when: wg_firewall_backend != 'none'
+
+# ---------- Server config ----------
+- name: Render /etc/wireguard/{{ wg_iface }}.conf
+  ansible.builtin.template:
+    src: "wg.conf.j2"
+    dest: "{{ wg_state_dir }}/{{ wg_iface }}.conf"
+    owner: root
+    group: root
+    mode: "0600"
+  notify: restart wg
+
+# ---------- Service ----------
+- name: Ensure wg-quick service enabled and started
+  ansible.builtin.systemd:
+    name: "wg-quick@{{ wg_iface }}"
+    enabled: true
+    state: started

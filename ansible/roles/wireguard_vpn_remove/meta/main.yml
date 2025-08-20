@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  author: "lizardking131313@gmail.com"
+  description: "Cleanup WireGuard + firewall rules without touching your web stack."
+  license: "MIT"
+  min_ansible_version: "2.13"
+dependencies: [ ]

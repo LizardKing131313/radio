@@ -1,0 +1,85 @@
+name: Switch Version (all profiles)
+
+on:
+  workflow_dispatch:
+    inputs:
+      new:
+        description: "New image tag (e.g. 0.3.0 or short git SHA)"
+        required: true
+        type: string
+      profiles:
+        description: "Compose profiles to switch (space-separated)"
+        required: false
+        default: "echo questionnaire"
+        type: string
+      distroless:
+        description: "Use distroless images?"
+        required: false
+        default: false
+        type: boolean
+      write_env:
+        description: "Persist VERSION to .env.prod after switch?"
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: switch-version
+  cancel-in-progress: false
+
+jobs:
+  switch:
+    # Раннер должен быть self-hosted на прод-сервере и иметь docker/compose
+    runs-on: [ self-hosted, docker ]
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    env:
+      ENV_FILE: .env.prod
+      PROFILES: ${{ inputs.profiles }}
+      NEW: ${{ inputs.new }}
+      DISTROLESS: ${{ inputs.distroless && '1' || '0' }}
+      WRITE_ENV: ${{ inputs.write_env && '1' || '0' }}
+      # Если используешь Docker Hub/свой реестр — можешь завести org-level var DOCKER_REGISTRY
+      DOCKER_REGISTRY: ${{ vars.DOCKER_REGISTRY }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # Опциональная авторизация в реестре (если не GHCR или runner не залогинен)
+      - name: Docker login (optional)
+        if: ${{ secrets.REGISTRY_USERNAME && secrets.REGISTRY_PASSWORD }}
+        run: |
+          REG="${DOCKER_REGISTRY:-ghcr.io}"
+          echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login "$REG" -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
+
+      - name: Show inputs
+        run: |
+          echo "NEW=${NEW}"
+          echo "PROFILES=${PROFILES}"
+          echo "DISTROLESS=${DISTROLESS}"
+          echo "WRITE_ENV=${WRITE_ENV}"
+          test -f "${ENV_FILE}" && echo "ENV_FILE=${ENV_FILE} exists" || (echo "ENV_FILE missing"; exit 1)
+
+      - name: Dry run (what will happen)
+        run: |
+          make switch-all-dry NEW="${NEW}" PROFILES="${PROFILES}" DISTROLESS=${DISTROLESS} ENV_FILE="${ENV_FILE}" || true
+
+      - name: Check images exist in registry
+        run: |
+          if [ "${DISTROLESS}" = "1" ]; then
+            make check-prod-distroless VERSION="${NEW}"
+          else
+            make check-prod VERSION="${NEW}"
+          fi
+
+      - name: Switch all profiles to new version
+        run: |
+          make switch-all NEW="${NEW}" PROFILES="${PROFILES}" DISTROLESS=${DISTROLESS} WRITE_ENV=${WRITE_ENV} ENV_FILE="${ENV_FILE}"
+
+      - name: Show running services
+        run: docker compose -f docker-compose.yml ps

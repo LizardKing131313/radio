@@ -1,0 +1,51 @@
+# Managed by Ansible — don't edit by hand.
+# Строгий sshd_config с поддержкой нескольких портов и IPv4/IPv6.
+
+{% set ports = (ssh_ports | default([22, 443])) | unique %}
+{% for p in ports %}
+  Port {{ p }}
+{% endfor %}
+
+# Protocol 2 уже дефолт — строка не нужна
+AddressFamily any
+
+# Слушаем на всех интерфейсах; переопредели через ssh_listen_addresses при желании
+{% if ssh_listen_addresses is defined and ssh_listen_addresses %}
+  {% for addr in ssh_listen_addresses %}
+    ListenAddress {{ addr }}
+  {% endfor %}
+{% else %}
+  ListenAddress 0.0.0.0
+  ListenAddress ::
+{% endif %}
+
+# Аутентификация
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+UsePAM yes
+
+PermitRootLogin prohibit-password
+PermitEmptyPasswords no
+
+# Жёстче поведение сессий
+X11Forwarding no
+AllowTcpForwarding no
+GatewayPorts no
+AllowAgentForwarding no
+
+# Лимиты и тайминги
+ClientAliveInterval 300
+ClientAliveCountMax 2
+LoginGraceTime 20
+MaxAuthTries 3
+MaxSessions 4
+
+# Безопасная подсистема SFTP
+Subsystem sftp internal-sftp
+
+# Опциональные match-блоки (пример):
+# Match User deploy
+#   AllowTcpForwarding yes
+#   PasswordAuthentication no

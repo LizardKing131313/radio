@@ -1,0 +1,45 @@
+---
+- hosts: vps_radio
+  become: true
+  gather_facts: false
+
+  roles:
+    - role: wireguard_vpn_remove
+      tags: [ cleanup ]
+
+  tasks:
+    - name: "Remove project packages"
+      ansible.builtin.apt:
+        name: "{{ packages_list | default([]) }}"
+        state: absent
+        purge: true
+      tags: [ cleanup ]
+
+    - name: "Remove user radio (with home)"
+      ansible.builtin.user:
+        name: radio
+        state: absent
+        remove: true
+      tags: [ cleanup ]
+
+    - name: "Remove sudoers file for radio"
+      ansible.builtin.file:
+        path: /etc/sudoers.d/radio
+        state: absent
+      tags: [ cleanup ]
+
+    - name: "Close project ports in UFW"
+      community.general.ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+        state: disabled
+      loop: "{{ ufw_allow_tcp_ports | difference([ssh_port|string]) }}"
+      ignore_errors: true
+      tags: [ cleanup ]
+
+- hosts: vps_vpn
+  become: true
+  roles:
+    - role: wireguard_vpn_remove
+      tags: [ vpn_remove ]

@@ -1,0 +1,9 @@
+---
+# tags: packages
+- name: "Packages | Install base packages"
+  ansible.builtin.apt:
+    name: "{{ packages_list | default([]) }}"
+    state: present
+    update_cache: false
+  when: packages_enabled | default(true)
+  tags: [ packages ]

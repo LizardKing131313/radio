@@ -1,0 +1,77 @@
+---
+- name: Compute WG network CIDR (network/prefix)
+  ansible.builtin.set_fact:
+    wg_network_cidr: "{{ wg_cidr | ansible.utils.ipaddr('network/prefix') }}"
+  when: wg_firewall_backend != 'none'
+
+- name: Detect nftables availability
+  ansible.builtin.command: "nft --version"
+  register: nft_check
+  changed_when: false
+  failed_when: false
+  when: wg_firewall_backend in ['auto', 'nftables']
+
+- name: Decide firewall backend
+  ansible.builtin.set_fact:
+    use_nftables: "{{ (wg_firewall_backend == 'nftables') or (wg_firewall_backend == 'auto' and nft_check.rc == 0) }}"
+    use_iptables: "{{ (wg_firewall_backend == 'iptables') or (wg_firewall_backend == 'auto' and nft_check.rc != 0) }}"
+  when: wg_firewall_backend != 'none'
+
+- name: Ensure nftables drop-in dir exists
+  ansible.builtin.file:
+    path: /etc/nftables.d
+    state: directory
+    mode: "0755"
+  when: use_nftables | default(false)
+
+- name: Install nft rules for WireGuard (drop-in)
+  ansible.builtin.template:
+    src: "nft-wg.nft.j2"
+    dest: "/etc/nftables.d/wireguard-ansible.nft"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload nftables
+  when: use_nftables | default(false)
+
+# iptables rules (idемпотентно через community.general.iptables)
+- name: Allow UDP {{ wg_listen_port }} (iptables)
+  ansible.builtin.shell: |
+    iptables -C INPUT -p udp --dport {{ wg_listen_port }} -j ACCEPT -m comment --comment ansible-wireguard 2>/dev/null || \
+    iptables -A INPUT -p udp --dport {{ wg_listen_port }} -j ACCEPT -m comment --comment ansible-wireguard
+  args:
+    warn: false
+  when:
+    - use_iptables | default(false)
+    - wg_open_port
+  changed_when: false
+
+- name: Accept forward WG -> OUT (iptables)
+  ansible.builtin.shell: |
+    iptables -C FORWARD -i {{ wg_iface }} -o {{ wg_nat_out_iface }} -s {{ wg_network_cidr }} -j ACCEPT -m comment --comment ansible-wireguard 2>/dev/null || \
+    iptables -A FORWARD -i {{ wg_iface }} -o {{ wg_nat_out_iface }} -s {{ wg_network_cidr }} -j ACCEPT -m comment --comment ansible-wireguard
+  args: { warn: false }
+  when:
+    - use_iptables | default(false)
+    - wg_enable_nat
+  changed_when: false
+
+- name: Accept forward OUT -> WG (ESTABLISHED,RELATED) (iptables)
+  ansible.builtin.shell: |
+    iptables -C FORWARD -i {{ wg_nat_out_iface }} -o {{ wg_iface }} -d {{ wg_network_cidr }} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT -m comment --comment ansible-wireguard 2>/dev/null || \
+    iptables -A FORWARD -i {{ wg_nat_out_iface }} -o {{ wg_iface }} -d {{ wg_network_cidr }} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT -m comment --comment ansible-wireguard
+  args: { warn: false }
+  when:
+    - use_iptables | default(false)
+    - wg_enable_nat
+  changed_when: false
+
+- name: NAT MASQUERADE (iptables)
+  ansible.builtin.shell: |
+    iptables -t nat -C POSTROUTING -s {{ wg_network_cidr }} -o {{ wg_nat_out_iface }} -j MASQUERADE -m comment --comment ansible-wireguard 2>/dev/null || \
+    iptables -t nat -A POSTROUTING -s {{ wg_network_cidr }} -o {{ wg_nat_out_iface }} -j MASQUERADE -m comment --comment ansible-wireguard
+  args: { warn: false }
+  when:
+    - use_iptables | default(false)
+    - wg_enable_nat
+  changed_when: false
