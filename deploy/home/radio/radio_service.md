@@ -12,6 +12,8 @@
 # 3. Настроить папки и права доступа
 
 ```bash
+    sudo apt install -y acl
+
     sudo usermod -aG www-data radio
 
     sudo install -d -m 2775 -o radio -g www-data /var/cache/radio
@@ -37,9 +39,17 @@
 # 5. Создать и запустить сервис
 
 ```bash
+    sudo chown -R radio:radio "/home/radio"
+    find "/home/radio" -type d -exec chmod 755 {} +
+    find "/home/radio" -type f -exec chmod 644 {} +
+    find "/home/radio" -type f -name "*.sh" -exec chmod 755 {} +
+
+    sudo chown radio:radio /home/radio/radio.sh
+    sudo chown radio:radio /home/radio/health_check.sh
+
     chmod +x ~/radio.sh
 
-    chmod +x ~/heath_check.sh
+    chmod +x ~/health_check.sh
 
     sudo systemctl enable radio.service
 

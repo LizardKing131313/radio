@@ -39,11 +39,9 @@
     border-radius: 10px
   }
 
-  #log {
-    white-space: pre-wrap;
-    font-size: 14px;
-    color: #bbb;
-    margin-top: 10px
+  button:hover {
+    background: #222;
+    cursor: pointer;
   }
 </style>
 
@@ -54,42 +52,64 @@
     <button id="play">▶️ Играть</button>
     <button id="mute">🔇/🔊</button>
   </div>
-  <div id="log"></div>
 </main>
 
 <script>
-  const src = location.origin + '/live/playlist.m3u8';
   const a = document.getElementById('a');
-  const log = (...x) => {
-    document.getElementById('log').textContent = x.join(' ')
-  };
 
-  function start() {
-    log('Стартуем: ' + src);
+  async function start() {
+    const sources = [
+      '/live/mp4/master.m3u8', // приоритет — CMAF
+      '/live/ts/master.m3u8'   // fallback — TS
+    ];
+
+    async function probe(url) {
+      try {
+        const r = await fetch(url, {method: 'HEAD', cache: 'no-store'});
+        return r.ok;
+      } catch {
+        return false;
+      }
+    }
+
+    // Safari / iOS — нативный HLS
     if (a.canPlayType('application/vnd.apple.mpegurl')) {
-      a.src = src;
-      a.play().catch(e => log('autoplay fail: ' + (e?.message || e)));
-    } else if (window.Hls && Hls.isSupported()) {
-      const hls = new Hls({
-        lowLatencyMode: false,
-        maxLiveSyncPlaybackRate: 1.0,
-        backBufferLength: 60,
-        fragLoadingTimeOut: 20000,
-        maxBufferLength: 30,
-      });
-      hls.loadSource(src);
+      for (const src of sources) {
+        if (await probe(src)) {
+          a.src = src;
+          await a.play().catch(() => {
+          });
+          return;
+        }
+      }
+      console.error('Нет доступных HLS плейлистов');
+      return;
+    }
+
+    // Остальные — через hls.js
+    if (window.Hls && Hls.isSupported()) {
+      const hls = new Hls({lowLatencyMode: true, backBufferLength: 10});
       hls.attachMedia(a);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => a.play().catch(e => log('autoplay fail: ' + (e?.message || e))));
-      hls.on(Hls.Events.ERROR, (_, d) => log('HLS error: ' + (d?.details || d?.type || 'unknown')));
-    } else {
-      log('Браузер без поддержки HLS/MSE. Поставь VLC.');
+
+      for (const src of sources) {
+        if (!(await probe(src))) continue;
+        try {
+          hls.loadSource(src);
+          await a.play().catch(() => {
+          });
+          return;
+        } catch {
+        }
+      }
+      console.error('Все источники упали');
     }
   }
 
-  document.getElementById('play').onclick = () => {
+  document.getElementById('play').onclick = () => async () => {
     a.muted = false;
-    start();
+    await start();
   };
+
   document.getElementById('mute').onclick = () => {
     a.muted = !a.muted;
   };

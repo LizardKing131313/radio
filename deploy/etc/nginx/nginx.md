@@ -19,6 +19,8 @@
 # 3. Запуск
 
 ```bash
+    sudo systemctl daemon-reload
+
     sudo systemctl start nginx
 
     sudo systemctl enable nginx

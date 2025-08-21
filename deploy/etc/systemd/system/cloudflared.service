@@ -1,0 +1,19 @@
+[Service]
+# Правильный тип для cloudflared — один форграунд‑процесс
+Type=simple
+# Нормальные таймауты, а не бесконечность
+TimeoutStartSec=15s
+TimeoutStopSec=5s
+
+# Гарантированно переопределим ExecStart и вернём логи в journald
+ExecStart=
+ExecStart=/usr/bin/cloudflared --no-autoupdate --config /etc/cloudflared/config.yml --loglevel debug tunnel run
+StandardOutput=journal
+StandardError=journal
+
+# (реком.) если у тебя есть системный пользователь:
+#User=cloudflared
+
+# Перезапуск по фейлу
+Restart=on-failure
+RestartSec=3s

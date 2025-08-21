@@ -13,3 +13,6 @@ ingress:
       noTLSVerify: false
       disableChunkedEncoding: false
   - service: http_status:404
+
+protocol: http2
+edge-ip-version: "4"

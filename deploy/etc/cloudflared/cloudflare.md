@@ -50,6 +50,8 @@
 # 8. Запуск службы
 
 ```bash
+    sudo systemctl daemon-reload
+
     sudo cloudflared service install
 
     sudo systemctl enable cloudflared
