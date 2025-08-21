@@ -42,4 +42,4 @@ search/_ydl/
 *.tmp
 
 *.webm
-/cookies
+cookies.txt

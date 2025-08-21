@@ -4,7 +4,7 @@ import random
 import sqlite3
 
 
-def make_queue(db: str, limit: int, shuffle: bool) -> list[str]:
+def make_playlist(db: str, limit: int, shuffle: bool) -> list[str]:
     with sqlite3.connect(db) as con:
         # noinspection PyTypeChecker,SqlResolve
         cur: sqlite3.Cursor = con.execute(
@@ -19,7 +19,7 @@ def make_queue(db: str, limit: int, shuffle: bool) -> list[str]:
     return urls
 
 
-def write_queue(urls: list[str], path: str) -> None:
+def write_playlist(urls: list[str], path: str) -> None:
     with open(path, "w", encoding="utf-8") as f:
         for u in urls:
             f.write(u + "\n")

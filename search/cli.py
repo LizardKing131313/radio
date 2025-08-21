@@ -8,7 +8,7 @@ import typer
 import yaml
 
 from .filters import explain_filters, pass_filters
-from .make_queue import make_queue, write_queue
+from .make_playlist import make_playlist, write_playlist
 from .repo import fetch_all_urls_set, open_db, upsert
 from .searcher import (
     YoutubeDL,
@@ -155,14 +155,14 @@ def update_db(
 
 
 @app.command()
-def build_queue(
+def build_playlist(
     config: str = str(BASE_DIR / "config.yaml"),
     db: str = str(BASE_DIR / "db.sqlite"),
-    out: str = str(BASE_DIR / "queue.txt"),
+    out: str = str(BASE_DIR / ".." / "deploy" / "home" / "radio" / "playlist.txt"),
 ) -> None:
     cfg = _load_cfg(config)
-    urls = make_queue(db, int(cfg["output"]["limit"]), bool(cfg["output"]["shuffle"]))
-    write_queue(urls, out)
+    urls = make_playlist(db, int(cfg["output"]["limit"]), bool(cfg["output"]["shuffle"]))
+    write_playlist(urls, out)
     typer.echo(f"Wrote {len(urls)} urls → {out}")
 
 

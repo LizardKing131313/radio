@@ -1,0 +1,47 @@
+[Unit]
+Description=Govnovoz FM - 24/7 radio (HLS)
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+User=radio
+Group=radio
+# radio входит в www-data → видит веб-папки
+SupplementaryGroups=www-data
+
+# Новый файлы будут 664/775 (group-write) → nginx и сервис не бодутся
+UMask=0002
+
+WorkingDirectory=/home/radio
+
+Environment=HOME=/home/radio
+Environment=XDG_CACHE_HOME=/var/cache/radio
+Environment=PATH=/home/radio/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+# Гарантированно создать каталоги перед стартом (если вдруг их нет/снесли)
+ExecStartPre=/usr/bin/install -d -m 2775 -o radio -g www-data /var/cache/radio
+ExecStartPre=/usr/bin/install -d -m 2775 -o radio -g www-data /var/www/html
+ExecStartPre=/usr/bin/install -d -m 2775 -o radio -g www-data /var/www/hls/ts
+ExecStartPre=/usr/bin/install -d -m 2775 -o radio -g www-data /var/www/hls/mp4
+
+# сам скрипт
+ExecStart=/home/radio/radio.sh
+
+StandardOutput=journal
+StandardError=journal
+
+# на всякий: больше файловых дескрипторов и чуть приоритет
+LimitNOFILE=65536
+Nice=-5
+# перезапускать, если упало
+Restart=always
+RestartSec=2
+
+# не спрашивать sudo-пароль внутри (но мы sudo не используем)
+TTYPath=/dev/null
+NoNewPrivileges=true
+TimeoutStopSec=20
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target

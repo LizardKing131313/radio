@@ -6,7 +6,7 @@ exec </dev/null
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 
 # ===== НАСТРОЙКИ =====
-ICE_URL="${ICE_URL:-icecast://source:sokolov@127.0.0.1:8443/stream}"  # поменяй пароль/порт если надо
+ICE_URL="${ICE_URL:-icecast://source:pwd@127.0.0.1:8443/stream}"  # поменяй пароль/порт если надо
 BITRATE="${BITRATE:-128k}"
 FIFO="${FIFO:-/tmp/radio.pcm}"
 HLS_DIR="${HLS_DIR:-/var/www/hls}"

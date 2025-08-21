@@ -1,0 +1,15 @@
+# CloudFare tunnel
+tunnel: 2b335c8f-c4a0-426b-a373-b83d2c16871f
+credentials-file: /etc/cloudflared/2b335c8f-c4a0-426b-a373-b83d2c16871f.json
+
+ingress:
+  - hostname: radio.govnovoz-fm.fun
+    service: http://127.0.0.1:80
+    originRequest:
+      httpHostHeader: radio.govnovoz-fm.fun
+      connectTimeout: 10s
+      keepAliveTimeout: 1m
+      keepAliveConnections: 100
+      noTLSVerify: false
+      disableChunkedEncoding: false
+  - service: http_status:404

@@ -1,9 +1,11 @@
-sudo tee /var/www/html/player.html >/dev/null <<'HTML'
 <!doctype html>
 <html lang="ru">
 <meta charset="utf-8">
 <meta content="width=device-width,initial-scale=1" name="viewport">
-<title>Говновоз Радио — Player</title>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.14/dist/hls.min.js"></script>
+
+<title>Говновоз Радио</title>
+
 <style>
   :root {
     color-scheme: dark light
@@ -44,8 +46,9 @@ sudo tee /var/www/html/player.html >/dev/null <<'HTML'
     margin-top: 10px
   }
 </style>
+
 <main>
-  <h1>Говновоз Радио — HLS (fMP4)</h1>
+  <h1>Говновоз Радио</h1>
   <audio controls id="a" playsinline></audio>
   <div>
     <button id="play">▶️ Играть</button>
@@ -53,7 +56,7 @@ sudo tee /var/www/html/player.html >/dev/null <<'HTML'
   </div>
   <div id="log"></div>
 </main>
-<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.14/dist/hls.min.js"></script>
+
 <script>
   const src = location.origin + '/live/playlist.m3u8';
   const a = document.getElementById('a');
@@ -91,4 +94,3 @@ sudo tee /var/www/html/player.html >/dev/null <<'HTML'
     a.muted = !a.muted;
   };
 </script>
-HTML
