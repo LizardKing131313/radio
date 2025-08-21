@@ -2,6 +2,7 @@
 <html lang="ru">
 <meta charset="utf-8">
 <meta content="width=device-width,initial-scale=1" name="viewport">
+<meta content="upgrade-insecure-requests" http-equiv="Content-Security-Policy">
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.14/dist/hls.min.js"></script>
 
 <title>Говновоз Радио</title>
@@ -57,19 +58,22 @@
 <script>
   const a = document.getElementById('a');
 
+  const ORIGIN = (location.protocol === 'https:')
+    ? location.origin
+    : ('https://' + location.host);
+
   async function start() {
     const sources = [
-      '/live/mp4/master.m3u8', // приоритет — CMAF
-      '/live/ts/master.m3u8'   // fallback — TS
+      '/live/mp4/playlist.m3u8', // CMAF/fMP4
+      '/live/ts/playlist.m3u8'   // TS
     ];
 
-    async function probe(url) {
-      try {
-        const r = await fetch(url, {method: 'HEAD', cache: 'no-store'});
-        return r.ok;
-      } catch {
-        return false;
-      }
+    async function probe(pathOrUrl) {
+      const u = new URL(pathOrUrl, location.origin); // гарантированно https
+      u.searchParams.set('_', Date.now());           // добавляем ?_=...
+      console.log('probe →', u.toString());          // временно: убедись, что НЕТ "/?" !
+      const r = await fetch(u.toString(), {method: 'HEAD', cache: 'no-store'});
+      return r.ok;
     }
 
     // Safari / iOS — нативный HLS
@@ -105,7 +109,7 @@
     }
   }
 
-  document.getElementById('play').onclick = () => async () => {
+  document.getElementById('play').onclick = async () => {
     a.muted = false;
     await start();
   };

@@ -21,30 +21,30 @@
 # 5. Логин
 
 ```bash
-    cloudflared login
+    sudo cloudflared login
 ```
 
 Убедится что создан файл с секретами типа xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.json
-по пути /etc/cloudflared
+по пути /root/.cloudflared
 
-# 6. Создать конфигурацию туннеля /etc/cloudflared/config.yml
+# 6. Создать туннель
+
+```bash
+    sudo cloudflared tunnel create radio-tunnel
+
+    sudo cloudflared tunnel list
+
+    sudo cloudflared tunnel info radio-tunnel
+```
+
+# 7. Создать конфигурацию туннеля /etc/cloudflared/config.yml
 
 Указать свой ИД в полях tunnel и credentials-file
 Ид это имя файла созданного после логина - xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 Выполнить валидацию конфига
 
 ```bash
-    cloudflared tunnel ingress validate
-```
-
-# 7. Создать туннель
-
-```bash
-    cloudflared tunnel create radio-tunnel
-
-    cloudflared tunnel list
-
-    cloudflared tunnel info radio-tunnel
+    sudo cloudflared tunnel ingress validate
 ```
 
 # 8. Запуск службы
@@ -64,11 +64,20 @@
 При изменении /etc/cloudflared/config.yml выполнить рестарт службы
 
 ```bash
-    cloudflared tunnel ingress validate
+    sudo cloudflared tunnel ingress validate
 
     sudo systemctl restart cloudflared
 
     sudo systemctl status cloudflared
+```
+
+Если канал с нуля пересоздавали привязать новый DNS.
+Зайти в CF и указать новый ИД в CNAME
+
+```bash
+    sudo cloudflared tunnel route dns radio-tunnel radio.govnovoz-fm.fun
+
+    sudo systemctl restart cloudflared
 ```
 
 Для просмотра логов
@@ -88,9 +97,9 @@
 
     sudo cloudflared service uninstall
 
-    cloudflared tunnel delete radio-tunnel
+    sudo cloudflared tunnel delete radio-tunnel
 
-    cloudflared tunnel cleanup radio-tunnel
+    sudo cloudflared tunnel cleanup radio-tunnel
 
     sudo apt remove --purge cloudflared -y
 

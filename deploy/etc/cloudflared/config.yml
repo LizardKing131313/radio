@@ -1,6 +1,6 @@
 # CloudFare tunnel
-tunnel: 2b335c8f-c4a0-426b-a373-b83d2c16871f
-credentials-file: /etc/cloudflared/2b335c8f-c4a0-426b-a373-b83d2c16871f.json
+tunnel: f624cf9e-6f9d-4676-9c45-cc38d4873570
+credentials-file: /root/.cloudflared/f624cf9e-6f9d-4676-9c45-cc38d4873570.json
 
 ingress:
   - hostname: radio.govnovoz-fm.fun

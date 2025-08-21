@@ -46,10 +46,14 @@
 
     sudo chown radio:radio /home/radio/radio.sh
     sudo chown radio:radio /home/radio/health_check.sh
+    sudo chown radio:radio /home/radio/.local/bin/yt-dlp
+    sudo chmod 755 /home/radio/.local/bin/yt-dlp
 
     chmod +x ~/radio.sh
 
     chmod +x ~/health_check.sh
+
+    sudo systemctl daemon-reload
 
     sudo systemctl enable radio.service
 
