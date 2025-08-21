@@ -10,6 +10,7 @@ ICE_URL="${ICE_URL:-icecast://source:sokolov@127.0.0.1:8443/stream}"  # поме
 BITRATE="${BITRATE:-128k}"
 FIFO="${FIFO:-/tmp/radio.pcm}"
 HLS_DIR="${HLS_DIR:-/var/www/hls}"
+YTDLP_COOKIES="$HOME/cookies.txt"
 PL="${PL:-$HOME/playlist.txt}"
 UA="${UA:-Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:142.0) Gecko/20100101 Firefox/142.0}"
 
@@ -69,6 +70,8 @@ resolve_audio_url() {
   for client in tv ios web; do
     for try in 1 2 3; do
       out="$(yt-dlp --force-ipv4 \
+        --cookies "$YTDLP_COOKIES" \
+        --user-agent "Mozilla/5.0" \
         --extractor-args "youtube:player_client=${client}" \
         -f bestaudio -g "$url" 2>/dev/null || true)"
       [[ -n "$out" ]] && { printf '%s\n' "$out"; return 0; }
