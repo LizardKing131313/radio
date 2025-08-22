@@ -6,7 +6,6 @@ exec </dev/null
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 
 # ===== НАСТРОЙКИ =====
-BITRATE="${BITRATE:-128k}"
 FIFO="${FIFO:-${XDG_CACHE_HOME:-/var/cache/radio}/radio.pcm}"
 HLS_DIR="${HLS_DIR:-/var/www/hls}"
 YTDLP_COOKIES="$HOME/cookies.txt"
@@ -19,6 +18,7 @@ trap cleanup INT TERM EXIT
 
 mkdir -p "$HLS_DIR"
 mkdir -p "$HLS_DIR" "$HLS_DIR/ts" "$HLS_DIR/mp4"
+rm -rf "$HLS_DIR/mp4/"* "$HLS_DIR/ts/"*
 mkdir -p "${XDG_CACHE_HOME:-/var/cache/radio}"
 rm -f "$FIFO"; mkfifo "$FIFO"; chmod 666 "$FIFO"
 
@@ -33,28 +33,40 @@ start_encoder() {
   while true; do
     /usr/bin/ffmpeg -nostdin -hide_banner -loglevel warning \
       -f s16le -ar 44100 -ac 2 -i "$FIFO" \
-      -af "asetrate=44100*1.01,aresample=44100" \
       \
-      -map 0:a -c:a aac -b:a "$BITRATE" -ar 44100 -ac 2 \
+      -map 0:a -map 0:a -map 0:a \
+      -c:a:0 aac -b:a:0 64k  -ar:0 44100 -ac:0 2 \
+      -c:a:1 aac -b:a:1 96k  -ar:1 44100 -ac:1 2 \
+      -c:a:2 aac -b:a:2 128k -ar:2 44100 -ac:2 2 \
+      \
       -f hls \
-      -hls_time 2 \
-      -hls_list_size 6 \
-      -hls_delete_threshold 3 \
-      -hls_flags independent_segments+append_list+omit_endlist+delete_segments \
+      -hls_time 6 \
+      -hls_list_size 12 \
+      -hls_delete_threshold 14 \
+      -hls_flags independent_segments+append_list+delete_segments \
+      -hls_start_number_source epoch \
+      -master_pl_name playlist.m3u8 \
+      -var_stream_map "a:0,name:64k a:1,name:96k a:2,name:128k" \
       -hls_segment_type mpegts \
-      -hls_segment_filename "$HLS_DIR/ts/seg_%05d.ts" \
-      "$HLS_DIR/ts/playlist.m3u8" \
+      -hls_segment_filename "$HLS_DIR/ts/v%v/seg_%05d.ts" \
+      "$HLS_DIR/ts/v%v/index.m3u8" \
       \
-      -map 0:a -c:a aac -b:a "$BITRATE" -ar 44100 -ac 2 \
+      -map 0:a -map 0:a -map 0:a \
+      -c:a:0 aac -b:a:0 64k  -ar:0 44100 -ac:0 2 \
+      -c:a:1 aac -b:a:1 96k  -ar:1 44100 -ac:1 2 \
+      -c:a:2 aac -b:a:2 128k -ar:2 44100 -ac:2 2 \
       -f hls \
-      -hls_time 2 \
-      -hls_list_size 6 \
-      -hls_delete_threshold 3 \
-      -hls_flags independent_segments+append_list+omit_endlist+delete_segments \
+      -hls_time 6 \
+      -hls_list_size 12 \
+      -hls_delete_threshold 14 \
+      -hls_flags independent_segments+omit_endlist+append_list+delete_segments \
+      -hls_start_number_source epoch \
+      -master_pl_name playlist.m3u8 \
+      -var_stream_map "a:0,name:64k a:1,name:96k a:2,name:128k" \
       -hls_segment_type fmp4 \
       -hls_fmp4_init_filename "init.mp4" \
-      -hls_segment_filename "$HLS_DIR/mp4/seg_%05d.m4s" \
-      "$HLS_DIR/mp4/playlist.m3u8" \
+      -hls_segment_filename "$HLS_DIR/mp4/v%v/seg_%05d.m4s" \
+      "$HLS_DIR/mp4/v%v/index.m3u8" \
       || true
     echo "[enc] encoder exited, restart in 1s..."
     sleep 1
@@ -118,6 +130,8 @@ play_one() {
 
 # ===== Стартуем =====
 start_encoder & ENC_PID=$!
+sleep 0.2
+exec 3>"$FIFO"
 
 while true; do
   if [[ -f "$PL" ]]; then
