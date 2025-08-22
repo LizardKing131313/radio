@@ -88,6 +88,7 @@ resolve_audio_url() {
       out="$(
         yt-dlp -v "${extra[@]}" \
           -f 'bestaudio[ext=m4a]/bestaudio/best' \
+          --print "%(title)s" \
           -g "$url" 2> >(tee /tmp/yt.err >&2) || true
       )"
 
@@ -97,7 +98,18 @@ resolve_audio_url() {
       fi
       rm -f /tmp/yt.err
 
-      [[ -n "$out" ]] && { printf '%s\n' "$out"; return 0; }
+      [[ -n "$out" ]] && {
+        title="$(printf '%s\n' "$out" | sed -n '1p')"
+        url_final="$(printf '%s\n' "$out" | sed -n '$p')"
+
+        NOW_JSON="$HLS_DIR/current_track.json"
+        esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+        tmp="${NOW_JSON}.tmp"
+        printf '{"title":"%s"}\n' "$(esc "$title")" >"$tmp"
+        mv -f "$tmp" "$NOW_JSON"
+
+        printf '%s\n' "$url_final"; return 0;
+      }
       sleep $((try*2))
     done
   done

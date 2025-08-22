@@ -29,10 +29,6 @@
     margin: .2rem 0 1rem
   }
 
-  audio {
-    width: 100%
-  }
-
   button {
     margin: 12px 6px 0 0;
     padding: 12px 16px;
@@ -44,10 +40,56 @@
     background: #222;
     cursor: pointer;
   }
+
+  audio {
+    width: 100%
+  }
+
+  .now-container {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    width: 100%;
+    overflow: hidden;
+    margin-bottom: 10px;
+  }
+
+  #now_wrapper {
+    flex: 1;
+    overflow: hidden;
+    white-space: nowrap;
+    position: relative;
+  }
+
+  #now_playing {
+    display: inline-block;
+    white-space: nowrap;
+    will-change: transform;
+  }
+
+  .scroll #now_playing {
+    padding-left: 100%;
+    animation: scroll-text 20s linear infinite;
+  }
+
+  @keyframes scroll-text {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-100%);
+    }
+  }
 </style>
 
 <main>
   <h1>Говновоз Радио</h1>
+  <div class="now-container">
+    <span id="now_label">Сейчас откачивает:</span>
+    <span id="now_wrapper">
+      <span id="now_playing"></span>
+    </span>
+  </div>
   <audio controls id="a" playsinline></audio>
   <div>
     <button id="play">▶️ Играть</button>
@@ -57,10 +99,6 @@
 
 <script>
   const a = document.getElementById('a');
-
-  const ORIGIN = (location.protocol === 'https:')
-    ? location.origin
-    : ('https://' + location.host);
 
   async function start() {
     const sources = [
@@ -112,9 +150,140 @@
   document.getElementById('play').onclick = async () => {
     a.muted = false;
     await start();
+    await refreshNow();
   };
 
   document.getElementById('mute').onclick = () => {
     a.muted = !a.muted;
   };
+
+  const wrapper = document.getElementById("now_wrapper");
+  const playing = document.getElementById("now_playing");
+
+  async function refreshNow() {
+    try {
+      const r = await fetch('/live/current_track.json', {cache: 'no-store'});
+      if (!r.ok) throw new Error('bad status');
+      const j = await r.json();
+      playing.textContent = j.title;
+    } catch (e) {
+    }
+  }
+
+  function updateScroll() {
+    if (!wrapper || !playing) return;
+    wrapper.classList.toggle("scroll", playing.scrollWidth > wrapper.clientWidth);
+  }
+
+  // 1) Изменился размер окна — обновим (c rAF, чтобы не дёргать по 100 раз)
+  window.addEventListener('resize', () => requestAnimationFrame(updateScroll));
+  // 2) DOM готов
+  document.addEventListener('DOMContentLoaded', updateScroll);
+  // 3) Шрифты подгрузились — метрики поменяются
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(updateScroll).catch(() => {
+    });
+  }
+  // 4) Следим за реальным изменением размеров wrapper
+  const ro1 = new ResizeObserver(updateScroll);
+  ro1.observe(wrapper);
+  // 5) И за изменением содержимого/переносов playing
+  const ro2 = new ResizeObserver(updateScroll);
+  ro2.observe(playing);
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const JSON_URL = '/live/current_track.json';
+    const M3U8_URL = '/live/mp4/playlist.m3u8';
+
+    let mediaUrl = null;
+    let target = 6;
+    let prevSeq = null;
+
+    playing.style.transition = 'opacity .25s ease';
+    playing.style.willChange = 'opacity';
+
+    const DELAY_SEGMENTS = 4; // начни с 4 (≈ 24 сек при hls_time=6)
+
+    function fadeSet(txt) {
+      if (!txt || txt === playing.textContent) return;
+      playing.style.opacity = '0';
+      setTimeout(() => {
+        playing.textContent = txt;
+        playing.style.opacity = '1';
+        updateScroll()
+      }, 200);
+    }
+
+    function pickVariant(masterTxt, baseUrl) {
+      const lines = masterTxt.split('\n');
+      const variants = [];
+      for (let i = 0; i < lines.length; i++) {
+        const inf = lines[i];
+        if (inf.startsWith('#EXT-X-STREAM-INF')) {
+          const bwm = inf.match(/BANDWIDTH=(\d+)/);
+          const uri = (lines[i + 1] || '').trim();
+          if (uri && !uri.startsWith('#')) {
+            variants.push({bw: bwm ? +bwm[1] : 9e12, uri});
+          }
+        }
+      }
+      variants.sort((a, b) => a.bw - b.bw);
+      const rel = variants[0]?.uri || null;
+      if (!rel) return null;
+      try {
+        return new URL(rel, new URL(baseUrl, location.href)).toString();
+      } catch {
+        return rel;
+      }
+    }
+
+    async function ensureMedia() {
+      if (mediaUrl) return mediaUrl;
+      const r = await fetch(M3U8_URL + '?t=' + performance.now(), {cache: 'no-store'});
+      if (!r.ok) throw new Error('master ' + r.status);
+      const txt = await r.text();
+      // если это уже media‑playlist (без STREAM-INF) — используем его
+      if (!/#EXT-X-STREAM-INF/i.test(txt)) {
+        mediaUrl = M3U8_URL;
+        return mediaUrl;
+      }
+      mediaUrl = pickVariant(txt, M3U8_URL);
+      if (!mediaUrl) throw new Error('no variants in master');
+      return mediaUrl;
+    }
+
+    async function fetchMeta() {
+      const r = await fetch(mediaUrl + '?t=' + performance.now(), {cache: 'no-store'});
+      if (!r.ok) throw new Error('media ' + r.status);
+      const txt = await r.text();
+      const seq = (txt.match(/#EXT-X-MEDIA-SEQUENCE:(\d+)/)?.[1]) | 0;
+      const td = +(txt.match(/#EXT-X-TARGETDURATION:(\d+)/)?.[1] || target);
+      target = td || target;
+      return {seq, target: td};
+    }
+
+    async function fetchTitleAndShow() {
+      const r = await fetch(JSON_URL + '?t=' + performance.now(), {cache: 'no-store'});
+      if (!r.ok) return;
+      const j = await r.json();
+      const title = (j?.title || '').trim();
+      if (title) fadeSet(title);
+    }
+
+    async function loop() {
+      try {
+        await ensureMedia();
+        const {seq, target: td} = await fetchMeta();
+        if (prevSeq === null) prevSeq = seq;
+        if (seq !== prevSeq) {
+          prevSeq = seq;
+          setTimeout(fetchTitleAndShow, (td * DELAY_SEGMENTS) * 1000);
+        }
+      } catch (_) {
+      }
+      setTimeout(loop, target * 1000);
+    }
+
+    loop();
+  });
 </script>
