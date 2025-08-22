@@ -37,7 +37,7 @@ from structlog.typing import FilteringBoundLogger, Processor
 
 def _common_processors() -> list[Processor]:
     return [
-        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.TimeStamper(fmt="iso", utc=True),
         merge_contextvars,  # pull run_id/node_id/name from contextvars
         structlog.processors.add_log_level,
         structlog.processors.StackInfoRenderer(),
