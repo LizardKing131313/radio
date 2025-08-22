@@ -1,0 +1,29 @@
+# Example configuration for the radio service
+
+paths:
+  base: /opt/radio
+  data: /opt/radio/data
+  cache_cold: /opt/radio/cache/cold
+  cache_hot: /opt/radio/cache/hot
+  runtime_fifo_dir: /opt/radio/runtime/fifo
+  runtime_info_dir: /opt/radio/runtime/info
+  fifo_audio_path: /opt/radio/runtime/fifo/radio.wav
+  nowplaying_path: /opt/radio/runtime/info/nowplaying.txt
+  www_hls_ts: /opt/radio/www/hls/ts
+  www_hls_mp4: /opt/radio/www/hls/mp4
+  www_html: /opt/radio/www/html
+
+hls:
+  # Mirrors ffmpeg flags
+  hls_time: 6
+  hls_list_size: 12
+  hls_delete_threshold: 14
+  bitrates: [ 64, 96, 128 ]
+
+# Secrets are intentionally left empty in YAML.
+# Provide them via environment variables:
+#   RADIO_YOUTUBE_API_KEY=...
+#   RADIO_YOUTUBE_STREAM_KEY=...  (or YT_STREAM_KEY / YOUTUBE_STREAM_KEY)
+#   RADIO_YOUTUBE_RTMP_ENABLED=true
+#   RADIO_YOUTUBE_RTMP_URL=rtmp://a.rtmp.youtube.com/live2
+secrets: { }
