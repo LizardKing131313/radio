@@ -30,6 +30,7 @@ async def drain_process_stream(
     stream_name: str,
     reader: asyncio.StreamReader | None,
     max_line_len: int = 1000,
+    extra: dict[str, object] | None = None,
 ) -> None:
     """Drain an async stream (stdout/stderr) and log each line safely."""
     if reader is None:
@@ -49,21 +50,17 @@ async def drain_process_stream(
             if len(line) > max_line_len:
                 line = line[:max_line_len] + "…"
 
-            logger.debug(
-                "proc.out",
-                process=process_name,
-                stream=prefix,
-                line=line,
-            )
+            fields: dict[str, object] = {"process": process_name, "stream": prefix, "line": line}
+            if extra:
+                fields.update(extra)
+            logger.debug("proc.out", **fields)
     except asyncio.CancelledError:
         raise
     except Exception as exc:
-        logger.warning(
-            "proc.out_error",
-            process=process_name,
-            stream=prefix,
-            error=repr(exc),
-        )
+        fields = {"process": process_name, "stream": prefix, "error": repr(exc)}
+        if extra:
+            fields.update(extra)
+        logger.warning("proc.out_error", **fields)
 
 
 def is_process_alive(proc: asyncio.subprocess.Process | None) -> bool:

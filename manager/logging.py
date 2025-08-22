@@ -28,11 +28,24 @@ from structlog.contextvars import (
     merge_contextvars,
 )
 from structlog.processors import JSONRenderer
-from structlog.stdlib import LoggerFactory, ProcessorFormatter
-from structlog.typing import FilteringBoundLogger
+from structlog.stdlib import ProcessorFormatter
+from structlog.typing import FilteringBoundLogger, Processor
 
 
 # ---- Public API -----------------------------------------------------------------
+
+
+def _common_processors() -> list[Processor]:
+    return [
+        structlog.processors.TimeStamper(fmt="iso"),
+        merge_contextvars,  # pull run_id/node_id/name from contextvars
+        structlog.processors.add_log_level,
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
+        structlog.processors.UnicodeDecoder(),
+        structlog.processors.dict_tracebacks,
+        structlog.processors.JSONRenderer(),  # final JSON
+    ]
 
 
 def configure_logging(run_id: str | None = None) -> str:
@@ -42,7 +55,7 @@ def configure_logging(run_id: str | None = None) -> str:
     Returns the effective run_id.
     """
     level: int = _parse_log_level(os.getenv("LOG_LEVEL"))
-    ts = structlog.processors.TimeStamper(fmt="iso", utc=True)
+    time_stamper = structlog.processors.TimeStamper(fmt="iso", utc=True)
 
     # Route stdlib logs -> structlog ProcessorFormatter -> JSON
     formatter = ProcessorFormatter(
@@ -51,7 +64,7 @@ def configure_logging(run_id: str | None = None) -> str:
             merge_contextvars,  # include contextvars (e.g., run_id) in stdlib logs
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
-            ts,
+            time_stamper,
         ],
     )
 
@@ -65,16 +78,9 @@ def configure_logging(run_id: str | None = None) -> str:
 
     # Configure structlog to pass through the ProcessorFormatter
     structlog.configure(
-        processors=[
-            merge_contextvars,
-            structlog.stdlib.add_logger_name,
-            structlog.stdlib.add_log_level,
-            ts,
-            structlog.processors.format_exc_info,
-            ProcessorFormatter.wrap_for_formatter,  # hand off to stdlib formatter
-        ],
-        logger_factory=LoggerFactory(),
-        wrapper_class=structlog.stdlib.BoundLogger,
+        processors=_common_processors(),
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        wrapper_class=structlog.make_filtering_bound_logger(level),
         cache_logger_on_first_use=True,
     )
 
