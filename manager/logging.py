@@ -28,7 +28,8 @@ from structlog.contextvars import (
     merge_contextvars,
 )
 from structlog.processors import JSONRenderer
-from structlog.stdlib import BoundLogger, LoggerFactory, ProcessorFormatter
+from structlog.stdlib import LoggerFactory, ProcessorFormatter
+from structlog.typing import FilteringBoundLogger
 
 
 # ---- Public API -----------------------------------------------------------------
@@ -82,7 +83,7 @@ def configure_logging(run_id: str | None = None) -> str:
     return effective_run_id
 
 
-def get_logger(name: str) -> BoundLogger:
+def get_logger(name: str) -> FilteringBoundLogger:
     """Get a structlog logger bound to `name`."""
     return structlog.get_logger(name)
 
