@@ -1,122 +1,82 @@
-"""
-DAG-based async process runner.
-
-- N processes with dependencies (DAG).
-- One generic supervision loop per node.
-- Exponential backoff with jitter on restarts.
-- Graceful handling of SIGINT/SIGTERM.
-- Cross-platform signaling.
-
-from manager.runner import Runner, ProcessNode, ProcessSpec, ProcessCmd
-
-def make_cmd_sleep(msg: str, secs: int) -> ProcessCmd:
-    import sys
-    return ProcessCmd(exe=sys.executable,
-    args=["-c", f"import time; print('{msg}'); time.sleep({secs})"])
-
-nodes = [
-    ProcessNode(id="A", spec=ProcessSpec(name="A", cmd_factory=lambda: make_cmd_sleep("A", 3600))),
-    ProcessNode(id="B", spec=ProcessSpec(name="B",
-    cmd_factory=lambda: make_cmd_sleep("B", 3600)), deps={"A"}),
-]
-
-runner = Runner(run_id="dev", nodes=nodes)
-# asyncio.run(runner.serve_forever())
-"""
-
 from __future__ import annotations
 
 import asyncio
 import contextlib
-import os
 import platform
 import signal
 import sys
-import time
 from collections import defaultdict, deque
+from typing import Any
 
 from structlog.contextvars import bind_contextvars
 from structlog.typing import FilteringBoundLogger
 
-from manager.logging import get_logger as project_get_logger
+from manager.logger import get_logger
 
-from .backoff import BackoffPolicy, BackoffState
+from .control import ControlBus, ControlNode, ControlResult, Error
+from .node import Node, NodeHandle
 from .signals import install_signal_handlers
-from .types import ManagedProcess, ProcessCmd, ProcessNode, ProcessSpec
-from .utils import cancel_task, drain_process_stream, is_process_alive
 
 
 class Runner:
-    """Abstract DAG runner supervising processes as a dependency graph."""
 
-    MAX_LOG_LINE_LEN = 1000  # protect logs
-
-    def __init__(
-        self,
-        run_id: str,
-        nodes: list[ProcessNode],
-        *,
-        default_backoff: BackoffPolicy | None = None,
-    ) -> None:
+    def __init__(self, run_id: str, control_bus: ControlBus, nodes: list[Node]) -> None:
         if not nodes:
-            raise ValueError("At least one ProcessNode is required")
+            raise ValueError("At least one Node is required")
 
+        self.control_bus = control_bus
+        self._kick_event: asyncio.Event = asyncio.Event()
         # Context: propagate run_id to all tasks created after this point
         self.run_id: str = run_id
         bind_contextvars(run_id=self.run_id)
 
         # Dedicated loggers
-        self.log_event: FilteringBoundLogger = project_get_logger("proc.event")
-        self.log_out: FilteringBoundLogger = project_get_logger("proc.out")
+        self.log_event: FilteringBoundLogger = get_logger("proc.event")
+        self.log_out: FilteringBoundLogger = get_logger("proc.out")
 
         # Index nodes
-        self.nodes_by_id: dict[str, ProcessNode] = {n.id: n for n in nodes}
-        if len(self.nodes_by_id) != len(nodes):
+        self.node_map: dict[ControlNode, Node] = {node.id: node for node in nodes}
+        if len(self.node_map) != len(nodes):
             raise ValueError("Duplicate node IDs are not allowed")
 
         # Graph: parents (deps) and children (reverse edges)
-        self.parents: dict[str, set[str]] = {n.id: set(n.deps) for n in nodes}
-        self.children: dict[str, set[str]] = defaultdict(set)
+        self.parents: dict[ControlNode, set[ControlNode]] = {
+            node.id: set(node.parent) for node in nodes
+        }
+        self.children: dict[ControlNode, set[ControlNode]] = defaultdict(set)
         for node in nodes:
-            for dep in node.deps:
-                if dep not in self.nodes_by_id:
-                    raise ValueError(f"Unknown dependency: {dep!r} for node {node.id!r}")
-                self.children[dep].add(node.id)
+            for dependency in node.parent:
+                if dependency not in self.node_map:
+                    raise ValueError(f"Unknown dependency: {dependency!r} for node {node.id!r}")
+                self.children[dependency].add(node.id)
 
         # Topological order (and cycle detection)
-        self.topo_order: list[str] = self._toposort(self.parents)
-        if len(self.topo_order) != len(nodes):
+        self.order: list[ControlNode] = self._toposort(self.parents)
+        if len(self.order) != len(nodes):
             raise ValueError("Dependency cycle detected")
-
-        # Backoff state per node
-        base_policy = default_backoff or BackoffPolicy()
-        self.backoff: dict[str, BackoffState] = {
-            nid: BackoffState(base_policy) for nid in self.nodes_by_id
-        }
 
         # Runtime state
         self.shutdown_event: asyncio.Event = asyncio.Event()
-        self.ready_event: dict[str, asyncio.Event] = {
-            nid: asyncio.Event() for nid in self.nodes_by_id
+        self.ready_event_map: dict[ControlNode, asyncio.Event] = {
+            node_id: asyncio.Event() for node_id in self.node_map
         }
-        self.proc_handles: dict[str, ManagedProcess] = {}
-        self._tasks: set[asyncio.Task[None]] = set()
 
-    # ----- Public API ---------------------------------------------------------------------------
+        self.handle_map: dict[ControlNode, NodeHandle] = {}
+        self._tasks: set[asyncio.Task[object]] = set()
 
     def health(self) -> dict[str, object]:
         """Health snapshot for HTTP /health."""
-        nodes_snapshot: dict[str, object] = {}
-        for nid, node in self.nodes_by_id.items():
-            handle = self.proc_handles.get(nid)
-            running = is_process_alive(handle.process) if handle else False
-            nodes_snapshot[nid] = {
-                "name": node.spec.name,
+        nodes_snapshot: dict[ControlNode, object] = {}
+        for node_id, node in self.node_map.items():
+            handle = self.handle_map.get(node_id)
+            running = handle.is_alive if handle else False
+            nodes_snapshot[node_id] = {
+                "name": node.runnable.name,
                 "running": running,
-                "ready": self.ready_event[nid].is_set(),
+                "ready": self.ready_event_map[node_id].is_set(),
                 "pid": handle.pid if handle else None,
-                "uptime_s": handle.uptime_seconds if handle else 0.0,
-                "deps": sorted(self.parents[nid]),
+                "uptime_sec": handle.uptime_seconds if handle else 0.0,
+                "parent": sorted(self.parents[node_id]),
             }
         return {
             "run_id": self.run_id,
@@ -126,30 +86,124 @@ class Runner:
 
     def ready(self) -> bool:
         """True when all nodes are 'ready' (probes passed or marked)."""
-        return all(evt.is_set() for evt in self.ready_event.values())
+        return all(event.is_set() for event in self.ready_event_map.values())
 
-    async def serve_forever(self) -> None:
+    def _track_task(self, task: asyncio.Task[Any]) -> None:
+        """Отслеживать таски и логировать необработанные исключения"""
+        self._tasks.add(task)
+
+        def _done(tracked_task: asyncio.Task[Any]) -> None:
+            self._tasks.discard(tracked_task)
+            if tracked_task.cancelled():
+                return
+            exception = tracked_task.exception()
+            if exception is not None:
+                self.log_event.error(
+                    "task.unhandled_exception", task=tracked_task.get_name(), error=str(exception)
+                )
+
+        task.add_done_callback(_done)
+
+    async def execute(self) -> None:
         """Start supervision tasks for all nodes and wait until shutdown."""
         loop = asyncio.get_running_loop()
         install_signal_handlers(loop, self._on_signal)
 
         # Spawn a supervisor loop per node
-        for nid in self.topo_order:
-            task = asyncio.create_task(self._supervise_node(nid), name=f"supervise:{nid}")
-            self._tasks.add(task)
+        for node_id in self.order:
+            task = asyncio.create_task(self._supervise_node(node_id), name=f"supervise:{node_id}")
+            self._track_task(task)
 
         self.log_event.info(
             "runner.started",
             platform=platform.platform(),
             python=sys.version.split()[0],
-            node_count=len(self.nodes_by_id),
+            node_count=len(self.node_map),
         )
 
+        # 2) Главный цикл: гонка между shutdown и приёмом control-сообщения.
         try:
-            await self.shutdown_event.wait()
+            while not self.shutdown_event.is_set():
+                receive_task: asyncio.Task[Any] = asyncio.create_task(
+                    self.control_bus.receive(), name="control.receive"
+                )
+                stop_task: asyncio.Task[Any] = asyncio.create_task(
+                    self.shutdown_event.wait(), name="runner.shutdown_wait"
+                )
+
+                done, pending = await asyncio.wait(
+                    {receive_task, stop_task}, return_when=asyncio.FIRST_COMPLETED
+                )
+
+                # Не допустить утечек тасок
+                for task in pending:
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
+
+                # Если пришёл shutdown — выходим
+                if stop_task in done and self.shutdown_event.is_set():
+                    break
+
+                # Обработка control-сообщения
+                if receive_task in done:
+                    message = receive_task.result()
+                    if message is None:
+                        # Например: bus закрылся. Выходим в shutdown.
+                        self.log_event.warning("control.receive_none")
+                        self.shutdown_event.set()
+                        break
+
+                    node_id = message.node
+                    if node_id is None:
+                        self.log_event.warning(
+                            "control.message_without_node",
+                            action=message.action,
+                            correlation_id=message.correlation_id,
+                        )
+                        continue
+
+                    node = self.node_map.get(node_id)
+                    if node is None:
+                        self.log_event.warning(
+                            "control.unknown_node",
+                            node=node_id,
+                            action=message.action,
+                            correlation_id=message.correlation_id,
+                        )
+                        continue
+
+                    ready_event = self.ready_event_map.get(node_id)
+                    if ready_event is None:
+                        self.log_event.error(
+                            "control.no_ready_event",
+                            node=node_id,
+                            action=message.action,
+                            correlation_id=message.correlation_id,
+                        )
+                        continue
+
+                    try:
+                        await node.runnable.receive(
+                            ready_event=ready_event,
+                            message=message,
+                            log_event=self.log_event,
+                        )
+                    except Exception as exception:
+                        # Не роняем раннер из-за одной ноды/команды
+                        self.log_event.error(
+                            "control.dispatch_failed",
+                            node=node_id,
+                            action=message.action,
+                            error=str(exception),
+                            correlation_id=message.correlation_id,
+                        )
         finally:
-            await self._graceful_stop_all()
-            await self._cancel_all_tasks()
+            # 3) Корректная остановка
+            with contextlib.suppress(Exception):
+                await self._graceful_stop_all()
+            with contextlib.suppress(Exception):
+                await self._cancel_all_tasks()
             self.log_event.info("runner.stopped")
 
     async def shutdown(self) -> None:
@@ -158,23 +212,20 @@ class Runner:
             self.log_event.info("runner.shutdown_requested")
             self.shutdown_event.set()
 
-    # ----- Signal handler -----------------------------------------------------------------------
-
     def _on_signal(self, received_sig: signal.Signals) -> None:
         self.log_event.warning("signal.received", signal=received_sig.name)
         task = asyncio.create_task(self.shutdown())
         self._tasks.add(task)
+        self._kick_event.set()
 
-    # ----- Supervision per node -----------------------------------------------------------------
-
-    async def _supervise_node(self, node_id: str) -> None:
-        node = self.nodes_by_id[node_id]
-        backoff_state = self.backoff[node_id]
-        ready_evt = self.ready_event[node_id]
+    async def _supervise_node(self, node_id: ControlNode) -> None:
+        node = self.node_map[node_id]
+        backoff_state = node.runnable.backoff_state
+        ready_event = self.ready_event_map[node_id]
 
         # Bind per-node context for all logs below
-        node_log_event = self.log_event.bind(node_id=node_id, name=node.spec.name)
-        node_log_out = self.log_out.bind(node_id=node_id, name=node.spec.name)
+        node_log_event = self.log_event.bind(node_id=node_id, name=node.runnable.name)
+        node_log_out = self.log_out.bind(node_id=node_id, name=node.runnable.name)
 
         while not self.shutdown_event.is_set():
             # 1) Gate: all parents ready
@@ -183,24 +234,37 @@ class Runner:
                 break
 
             # 2) Try start
-            handle = await self._start_process(
-                node_id, node.spec, backoff_state, node_log_event, node_log_out
-            )
+            handle = await node.runnable.start(node_log_event, node_log_out)
             if handle is None:
                 await self.shutdown()
                 break
 
-            self.proc_handles[node_id] = handle
+            self.handle_map[node_id] = handle
 
             # 3) Mark ready (immediately or via probe)
-            await self._mark_ready(node_id, node_log_event)
+            await node.runnable.mark_ready(ready_event, node_log_event)
+
+            # 3.1) Start periodic health-check watchdog (optional)
+            health_task: asyncio.Task[Any] | None = None
+            interval_sec = node.runnable.health_interval_sec
+            threshold = node.runnable.health_fail_threshold
+            if interval_sec > 0.0 and threshold > 0:
+                health_task = asyncio.create_task(
+                    self._health_watchdog(
+                        node_id, ready_event, node_log_event, interval_sec, threshold
+                    ),
+                    name=f"health:{node_id}",
+                )
+                self._track_task(health_task)
 
             # 4) Wait for exit or shutdown
-            return_code = await self._wait_or_shutdown(handle.process)
+            return_code = await node.runnable.wait_or_shutdown(
+                handle, shutdown_event=self.shutdown_event, log_event=node_log_event
+            )
             uptime = handle.uptime_seconds
 
             # 5) On exit: clear ready; stop all dependents
-            ready_evt.clear()
+            ready_event.clear()
             for child_id in self.children.get(node_id, ()):
                 await self._stop_node(child_id, reason=f"{node_id}_down")
 
@@ -212,12 +276,16 @@ class Runner:
             )
 
             # 6) Ensure process is stopped and cleanup
-            await self._stop_process(
-                handle,
-                reason="exit" if not self.shutdown_event.is_set() else "shutdown",
-                log=node_log_event,
-            )
-            self.proc_handles.pop(node_id, None)
+            # Stop health task first (so оно не дёргало check во время стопа)
+            if health_task:
+                health_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await health_task
+                # noinspection PyUnusedLocal
+                health_task = None
+
+            await node.runnable.stop(handle, "exit", node_log_event)
+            self.handle_map.pop(node_id, None)
 
             # 7) Backoff bookkeeping and retry
             backoff_state.reset_if_uptime_good(uptime)
@@ -237,228 +305,108 @@ class Runner:
             )
             await asyncio.sleep(delay)
 
+    async def stop(self, reason: str = "manual") -> None:
+        """Gracefully request shutdown (idempotent)."""
+        if self.shutdown_event.is_set():
+            return
+        self.log_event.info("runner.stop_requested", reason=reason)
+        self.shutdown_event.set()
+        # пнуть всех, кто ждёт родителей/контроля
+        self._kick_event.set()
+
     # ----- Graph helpers ------------------------------------------------------------------------
 
     @staticmethod
-    def _toposort(parents: dict[str, set[str]]) -> list[str]:
-        indegree: dict[str, int] = {n: len(deps) for n, deps in parents.items()}
-        children: dict[str, set[str]] = defaultdict(set)
-        for child, deps in parents.items():
-            for p in deps:
-                children[p].add(child)
-        q: deque[str] = deque([n for n, d in indegree.items() if d == 0])
-        order: list[str] = []
-        while q:
-            n = q.popleft()
-            order.append(n)
-            for c in children.get(n, ()):
-                indegree[c] -= 1
-                if indegree[c] == 0:
-                    q.append(c)
+    def _toposort(dependencies_by_node: dict[ControlNode, set[ControlNode]]) -> list[ControlNode]:
+        """
+        Perform a topological sort.
+
+        Args:
+            dependencies_by_node: mapping of node -> set of nodes it depends on.
+                Example: {"ffmpeg": {"liquidsoap"}, "liquidsoap": set()}
+
+        Returns:
+            A list of nodes in dependency-safe order (parents before dependents).
+
+        Raises:
+            ValueError: if the graph contains a cycle.
+        """
+        # Нормализуем множество всех узлов: и ключи, и упомянутые зависимости
+        all_nodes: set[ControlNode] = set(dependencies_by_node.keys())
+        for deps in dependencies_by_node.values():
+            all_nodes.update(deps)
+
+        # Заполним пустые зависимости для упомянутых, но не объявленных узлов
+        normalized_dependencies: dict[ControlNode, set[ControlNode]] = {
+            node: set(dependencies_by_node.get(node, set())) for node in all_nodes
+        }
+
+        # Подсчёт входящих рёбер (indegree) и таблица зависимых (children)
+        inbound_edge_count: dict[ControlNode, int] = {
+            node: len(parents) for node, parents in normalized_dependencies.items()
+        }
+        dependents_by_node: dict[ControlNode, set[ControlNode]] = defaultdict(set)
+        for node, parents in normalized_dependencies.items():
+            for parent in parents:
+                dependents_by_node[parent].add(node)
+
+        # Очередь узлов, готовых к запуску (без входящих рёбер)
+        ready_queue: deque[ControlNode] = deque(
+            [node for node, count in inbound_edge_count.items() if count == 0]
+        )
+
+        order: list[ControlNode] = []
+        while ready_queue:
+            node = ready_queue.popleft()
+            order.append(node)
+
+            for dependent in dependents_by_node.get(node, ()):
+                inbound_edge_count[dependent] -= 1
+                if inbound_edge_count[dependent] == 0:
+                    ready_queue.append(dependent)
+
+        # Если не все узлы были упорядочены — значит цикл
+        if len(order) != len(all_nodes):
+            raise ValueError("Graph contains a cycle")
+
         return order
 
-    async def _wait_parents_ready(self, node_id: str) -> None:
+    async def _wait_parents_ready(self, node_id: ControlNode) -> None:
         parents = self.parents.get(node_id, set())
         if not parents:
             return
+
         # Wait until all parents are ready (or shutdown).
         while not self.shutdown_event.is_set():
-            if all(self.ready_event[p].is_set() for p in parents):
+            if self.node_map[node_id].disabled:
+                return  # включат — цикл начнет заново
+
+            if all(self.ready_event_map[parent].is_set() for parent in parents):
                 return
-            waits = {asyncio.create_task(self.ready_event[p].wait()) for p in parents}
+
+            waits = {asyncio.create_task(self.ready_event_map[parent].wait()) for parent in parents}
+            waits.add(asyncio.create_task(self._kick_event.wait()))
             waits.add(asyncio.create_task(self.shutdown_event.wait()))
             done, pending = await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
-            for t in pending:
-                t.cancel()
-            if self.shutdown_event.is_set():
-                return
+            for task in pending:
+                task.cancel()
+            self._kick_event.clear()
 
-    # ----- Start/Stop & readiness ---------------------------------------------------------------
-
-    async def _start_process(
-        self,
-        node_id: str,
-        spec: ProcessSpec,
-        backoff_state: BackoffState,
-        node_log_event: FilteringBoundLogger,
-        node_log_out: FilteringBoundLogger,
-    ) -> ManagedProcess | None:
-        if self.shutdown_event.is_set():
-            return None
-
-        cmd: ProcessCmd = spec.cmd_factory()
-        env = os.environ.copy()
-        if cmd.env:
-            env.update(cmd.env)
-        if spec.env_extra:
-            env.update(spec.env_extra)
-
-        popen_kwargs: dict[str, object] = {
-            "cwd": cmd.cwd,
-            "env": env,
-            "stdin": asyncio.subprocess.DEVNULL,
-            "stdout": asyncio.subprocess.PIPE,
-            "stderr": asyncio.subprocess.PIPE,
-        }
-
-        # Separate session/group to broadcast signals
-        if sys.platform != "win32":
-            popen_kwargs["start_new_session"] = True
-        else:
-            popen_kwargs["creationflags"] = 0x00000200
-
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                cmd.exe,
-                *cmd.args,
-                **popen_kwargs,  # type: ignore[arg-type]
-            )
-        except FileNotFoundError:
-            node_log_event.error(
-                "proc.start_error", error="FileNotFoundError", exe=cmd.exe, args=cmd.args
-            )
-            return None
-        except Exception as exc:
-            node_log_event.error("proc.start_error", error=repr(exc))
-            return None
-
-        backoff_state.register_start()
-        handle = ManagedProcess(
-            process_spec=spec,
-            process=proc,
-            started_monotonic=time.monotonic(),
-            stdout_task=asyncio.create_task(
-                drain_process_stream(
-                    node_log_out,
-                    process_name=spec.name,
-                    stream_name="stdout",
-                    reader=proc.stdout,
-                    max_line_len=self.MAX_LOG_LINE_LEN,
-                    extra={"node_id": node_id, "name": spec.name},
-                ),
-                name=f"drain:{node_id}:stdout",
-            ),
-            stderr_task=asyncio.create_task(
-                drain_process_stream(
-                    node_log_out,
-                    process_name=spec.name,
-                    stream_name="stderr",
-                    reader=proc.stderr,
-                    max_line_len=self.MAX_LOG_LINE_LEN,
-                    extra={"node_id": node_id, "name": spec.name},
-                ),
-                name=f"drain:{node_id}:stderr",
-            ),
-        )
-        node_log_event.info("proc.started", pid=proc.pid, cwd=cmd.cwd, exe=cmd.exe, args=cmd.args)
-        return handle
-
-    async def _mark_ready(self, node_id: str, node_log_event: FilteringBoundLogger) -> None:
-        spec = self.nodes_by_id[node_id].spec
-        evt = self.ready_event[node_id]
-        if spec.ready_probe is None:
-            evt.set()
-            node_log_event.info("proc.ready")
+    async def _stop_node(self, node_id: ControlNode, *, reason: str) -> None:
+        node = self.node_map.get(node_id)
+        if node is None:
             return
-        try:
-            ok = await asyncio.wait_for(spec.ready_probe(), timeout=spec.ready_timeout_s)
-        except TimeoutError:
-            ok = False
-        except Exception as exc:
-            node_log_event.warning("proc.ready_probe_error", error=repr(exc))
-            ok = False
-        if ok:
-            evt.set()
-            node_log_event.info("proc.ready")
-        else:
-            node_log_event.warning("proc.ready_timeout", timeout_s=spec.ready_timeout_s)
-
-    async def _stop_node(self, node_id: str, *, reason: str) -> None:
-        handle = self.proc_handles.get(node_id)
+        handle = self.handle_map.get(node_id)
         if handle is None:
             return
-        node_log_event = self.log_event.bind(node_id=node_id, name=handle.process_spec.name)
-        await self._stop_process(handle, reason=reason, log=node_log_event)
-        self.proc_handles.pop(node_id, None)
-        self.ready_event[node_id].clear()
 
-    async def _stop_process(
-        self, handle: ManagedProcess, *, reason: str, log: FilteringBoundLogger
-    ) -> None:
-        process = handle.process
-        spec = handle.process_spec
-
-        self._send_terminate(process)
-        log.info("proc.terminate_sent", pid=process.pid, reason=reason)
-
-        try:
-            await asyncio.wait_for(process.wait(), timeout=spec.stop_timeout_s)
-            log.info("proc.terminated", pid=process.pid, returncode=process.returncode)
-        except TimeoutError:
-            self._send_kill(process)
-            log.warning("proc.kill_sent", pid=process.pid)
-            try:
-                await asyncio.wait_for(process.wait(), timeout=spec.kill_timeout_s)
-            except TimeoutError:
-                log.error("proc.kill_timeout", pid=process.pid)
-
-        await cancel_task(handle.stdout_task)
-        await cancel_task(handle.stderr_task)
-
-    # ----- Platform-specific signaling ----------------------------------------------------------
-
-    def _send_terminate(self, proc: asyncio.subprocess.Process) -> None:
-        if proc.returncode is not None:
-            return
-        try:
-            if sys.platform != "win32":
-                if proc.pid is not None:
-                    os.killpg(proc.pid, signal.SIGTERM)  # type: ignore[attr-defined]
-            else:
-                if proc.pid is not None:
-                    try:
-                        proc.send_signal(signal.CTRL_BREAK_EVENT)
-                    except Exception:
-                        proc.terminate()
-        except ProcessLookupError:
-            pass
-        except Exception as exc:
-            self.log_event.warning("signal.term_error", error=repr(exc))
-
-    def _send_kill(self, proc: asyncio.subprocess.Process) -> None:
-        if proc.returncode is not None:
-            return
-        try:
-            if sys.platform != "win32":
-                if proc.pid is not None:
-                    os.killpg(proc.pid, signal.SIGKILL)  # type: ignore[attr-defined]
-            else:
-                proc.kill()
-        except ProcessLookupError:
-            pass
-        except Exception as exc:
-            self.log_event.warning("signal.kill_error", error=repr(exc))
-
-    # ----- Wait helpers -------------------------------------------------------------------------
-
-    async def _wait_or_shutdown(self, proc: asyncio.subprocess.Process) -> int | None:
-        """Wait for process exit or global shutdown; return returncode if exited first."""
-        wait_task = asyncio.create_task(proc.wait(), name="wait:proc_exit")
-        shutdown_task = asyncio.create_task(self.shutdown_event.wait(), name="wait:shutdown")
-        done, pending = await asyncio.wait(
-            {wait_task, shutdown_task}, return_when=asyncio.FIRST_COMPLETED
-        )
-        for t in pending:
-            t.cancel()
-        if wait_task in done:
-            with contextlib.suppress(Exception):
-                return wait_task.result()
-        return None
+        node_log_event = self.log_event.bind(node_id=node_id, name=node.runnable.name)
+        await node.runnable.stop(handle, reason=reason, log_event=node_log_event)
 
     async def _graceful_stop_all(self) -> None:
         # Stop in reverse topological order.
-        for nid in reversed(self.topo_order):
-            await self._stop_node(nid, reason="shutdown")
+        for node_id in reversed(self.order):
+            await self._stop_node(node_id, reason="shutdown")
 
     async def _cancel_all_tasks(self) -> None:
         if not self._tasks:
@@ -467,3 +415,49 @@ class Runner:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
+
+    async def _health_watchdog(
+        self,
+        node_id: ControlNode,
+        ready_event: asyncio.Event,
+        log_event: FilteringBoundLogger,
+        interval_s: float,
+        fail_threshold: int,
+    ) -> None:
+        """
+        Periodically calls runnable.check(). If it fails `fail_threshold` times in a row,
+        stops the node with reason='healthcheck_failed' (triggering normal restart/backoff).
+        """
+        node = self.node_map[node_id]
+        fails = 0
+        while not self.shutdown_event.is_set():
+            await asyncio.sleep(interval_s)
+            handle = self.handle_map.get(node_id)
+
+            if handle is None or not handle.is_alive:
+                return
+
+            result: ControlResult = Error("check error")
+            try:
+                result = await node.runnable.check(ready_event=ready_event, log_event=log_event)
+            except Exception as exception:
+                log_event.warning("health.check_exception", error=repr(exception))
+
+            if result.is_ok:
+                if fails:
+                    log_event.info("health.ok_after_fail", consecutive_fails=fails)
+                fails = 0
+                continue
+
+            fails += 1
+            log_event.warning("health.fail", consecutive_fails=fails, threshold=fail_threshold)
+            if fails >= fail_threshold:
+                handle = self.handle_map.get(node_id)
+                if handle is not None:
+                    try:
+                        await node.runnable.stop(
+                            handle, reason="healthcheck_failed", log_event=log_event
+                        )
+                    except Exception as exc:
+                        log_event.error("health.stop_failed", error=repr(exc))
+                return

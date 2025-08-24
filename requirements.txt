@@ -11,7 +11,7 @@ click==8.2.1
 colorama==0.4.6
     # via click
 jinja2==3.1.6
-    # via playlist_search (pyproject.toml)
+    # via radio_manager (pyproject.toml)
 markdown-it-py==4.0.0
     # via rich
 markupsafe==3.0.2
@@ -19,26 +19,36 @@ markupsafe==3.0.2
 mdurl==0.1.2
     # via markdown-it-py
 pydantic==2.11.7
-    # via playlist_search (pyproject.toml)
+    # via
+    #   pydantic-settings
+    #   radio_manager (pyproject.toml)
 pydantic-core==2.33.2
     # via pydantic
+pydantic-settings==2.10.1
+    # via radio_manager (pyproject.toml)
 pygments==2.19.2
     # via rich
+python-dotenv==1.1.1
+    # via pydantic-settings
 pyyaml==6.0.2
-    # via playlist_search (pyproject.toml)
+    # via radio_manager (pyproject.toml)
 rich==14.1.0
     # via typer
 shellingham==1.5.4
     # via typer
+structlog==25.4.0
+    # via radio_manager (pyproject.toml)
 typer==0.16.1
-    # via playlist_search (pyproject.toml)
-typing-extensions==4.14.1
+    # via radio_manager (pyproject.toml)
+typing-extensions==4.15.0
     # via
     #   pydantic
     #   pydantic-core
     #   typer
     #   typing-inspection
 typing-inspection==0.4.1
-    # via pydantic
-yt-dlp==2025.8.11
-    # via playlist_search (pyproject.toml)
+    # via
+    #   pydantic
+    #   pydantic-settings
+yt-dlp==2025.8.27
+    # via radio_manager (pyproject.toml)

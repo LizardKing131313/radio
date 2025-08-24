@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from functools import cache
 from pathlib import Path
 from typing import ClassVar
 
@@ -14,19 +15,30 @@ class MissingConfigError(RuntimeError):
 
 
 class Paths(BaseModel):
-    """Default filesystem layout under /opt/radio."""
 
     base: Path = Path("/opt/radio")
-    data: Path = Path("/opt/radio/data")
-    cache_cold: Path = Path("/opt/radio/cache/cold")
-    cache_hot: Path = Path("/opt/radio/cache/hot")
-    runtime_fifo_dir: Path = Path("/opt/radio/runtime/fifo")
-    runtime_info_dir: Path = Path("/opt/radio/runtime/info")
-    fifo_audio_path: Path = Path("/opt/radio/runtime/fifo/radio.wav")
-    nowplaying_path: Path = Path("/opt/radio/runtime/info/nowplaying.txt")
-    www_hls_ts: Path = Path("/opt/radio/www/hls/ts")
-    www_hls_mp4: Path = Path("/opt/radio/www/hls/mp4")
-    www_html: Path = Path("/opt/radio/www/html")
+    data: Path = base / "data"
+    cache_cold: Path = base / "cache" / "cold"
+    cache_hot: Path = base / "cache" / "hot"
+    runtime_fifo_dir: Path = base / "runtime" / "fifo"
+    runtime_info_dir: Path = base / "runtime" / "info"
+    fifo_audio_path: Path = runtime_fifo_dir / "radio.wav"
+    nowplaying_path: Path = runtime_info_dir / "nowplaying.txt"
+    www_hls_ts: Path = base / "www" / "hls" / "ts"
+    www_hls_mp4: Path = base / "www" / "hls" / "mp4"
+    www_html: Path = base / "www" / "html"
+
+
+class LiquidSoapSettings(BaseModel):
+
+    telnet_host: str = "127.0.0.1"
+    telnet_port: int = 1234
+    restart_timer_max_sec: int = 5
+    connect_timeout_sec: float = 5.0
+    command_timeout_sec: float = 5.0
+    per_line_timeout_sec: float = 0.2
+    max_lines: int = 1000
+    max_total_bytes: int = 256 * 1024
 
 
 class HLSSettings(BaseModel):
@@ -97,6 +109,7 @@ class AppConfig(BaseSettings):
     )
 
     paths: Paths = Field(default_factory=Paths)
+    liquidsoap: LiquidSoapSettings = Field(default_factory=LiquidSoapSettings)
     hls: HLSSettings = Field(default_factory=HLSSettings)
     secrets: Secrets = Field(default_factory=Secrets)
 
@@ -168,10 +181,9 @@ class AppConfig(BaseSettings):
         return cfg
 
 
-__all__ = [
-    "AppConfig",
-    "HLSSettings",
-    "MissingConfigError",
-    "Paths",
-    "Secrets",
-]
+@cache
+def get_settings() -> AppConfig:
+    return AppConfig()
+
+
+__all__ = ["AppConfig", "HLSSettings", "MissingConfigError", "Paths", "Secrets", "get_settings"]

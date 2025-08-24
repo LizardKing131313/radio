@@ -61,8 +61,3 @@ async def drain_process_stream(
         if extra:
             fields.update(extra)
         logger.warning("proc.out_error", **fields)
-
-
-def is_process_alive(proc: asyncio.subprocess.Process | None) -> bool:
-    """Return True if the given subprocess is alive."""
-    return proc is not None and proc.returncode is None

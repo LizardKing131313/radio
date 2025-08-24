@@ -7,9 +7,9 @@
 annotated-types==0.7.0
     # via pydantic
 anybadge==1.16.0
-    # via playlist_search (pyproject.toml)
+    # via radio_manager (pyproject.toml)
 black==25.1.0
-    # via playlist_search (pyproject.toml)
+    # via radio_manager (pyproject.toml)
 boolean-py==5.0
     # via license-expression
 cachecontrol[filecache]==0.14.3
@@ -30,10 +30,10 @@ colorama==0.4.6
     # via
     #   click
     #   pytest
-coverage[toml]==7.10.4
+coverage[toml]==7.10.5
     # via
-    #   playlist_search (pyproject.toml)
     #   pytest-cov
+    #   radio_manager (pyproject.toml)
 cyclonedx-python-lib==9.1.0
     # via pip-audit
 defusedxml==0.7.1
@@ -51,7 +51,7 @@ idna==3.10
 iniconfig==2.1.0
     # via pytest
 jinja2==3.1.6
-    # via playlist_search (pyproject.toml)
+    # via radio_manager (pyproject.toml)
 license-expression==30.4.4
     # via cyclonedx-python-lib
 markdown-it-py==4.0.0
@@ -63,7 +63,7 @@ mdurl==0.1.2
 msgpack==1.1.1
     # via cachecontrol
 mypy==1.17.1
-    # via playlist_search (pyproject.toml)
+    # via radio_manager (pyproject.toml)
 mypy-extensions==1.1.0
     # via
     #   black
@@ -86,10 +86,10 @@ pathspec==0.12.1
 pip-api==0.0.34
     # via pip-audit
 pip-audit==2.9.0
-    # via playlist_search (pyproject.toml)
+    # via radio_manager (pyproject.toml)
 pip-requirements-parser==32.0.1
     # via pip-audit
-platformdirs==4.3.8
+platformdirs==4.4.0
     # via
     #   black
     #   pip-audit
@@ -99,13 +99,17 @@ pluggy==1.6.0
     #   pytest
     #   pytest-cov
 pre-commit==4.3.0
-    # via playlist_search (pyproject.toml)
+    # via radio_manager (pyproject.toml)
 py-serializable==2.1.0
     # via cyclonedx-python-lib
 pydantic==2.11.7
-    # via playlist_search (pyproject.toml)
+    # via
+    #   pydantic-settings
+    #   radio_manager (pyproject.toml)
 pydantic-core==2.33.2
     # via pydantic
+pydantic-settings==2.10.1
+    # via radio_manager (pyproject.toml)
 pygments==2.19.2
     # via
     #   pytest
@@ -114,17 +118,22 @@ pyparsing==3.2.3
     # via pip-requirements-parser
 pytest==8.4.1
     # via
-    #   playlist_search (pyproject.toml)
     #   pytest-asyncio
+    #   pytest-builtin-types
     #   pytest-cov
+    #   radio_manager (pyproject.toml)
 pytest-asyncio==1.1.0
-    # via playlist_search (pyproject.toml)
+    # via radio_manager (pyproject.toml)
+pytest-builtin-types==1.2
+    # via radio_manager (pyproject.toml)
 pytest-cov==6.2.1
-    # via playlist_search (pyproject.toml)
+    # via radio_manager (pyproject.toml)
+python-dotenv==1.1.1
+    # via pydantic-settings
 pyyaml==6.0.2
     # via
-    #   playlist_search (pyproject.toml)
     #   pre-commit
+    #   radio_manager (pyproject.toml)
 requests==2.32.5
     # via
     #   cachecontrol
@@ -133,17 +142,23 @@ rich==14.1.0
     # via
     #   pip-audit
     #   typer
-ruff==0.12.9
-    # via playlist_search (pyproject.toml)
+ruff==0.12.10
+    # via radio_manager (pyproject.toml)
 shellingham==1.5.4
     # via typer
 sortedcontainers==2.4.0
     # via cyclonedx-python-lib
+structlog==25.4.0
+    # via radio_manager (pyproject.toml)
 toml==0.10.2
     # via pip-audit
 typer==0.16.1
-    # via playlist_search (pyproject.toml)
-typing-extensions==4.14.1
+    # via radio_manager (pyproject.toml)
+types-pyyaml==6.0.12.20250822
+    # via radio_manager (pyproject.toml)
+types-requests==2.32.4.20250809
+    # via radio_manager (pyproject.toml)
+typing-extensions==4.15.0
     # via
     #   mypy
     #   pydantic
@@ -151,13 +166,17 @@ typing-extensions==4.14.1
     #   typer
     #   typing-inspection
 typing-inspection==0.4.1
-    # via pydantic
+    # via
+    #   pydantic
+    #   pydantic-settings
 urllib3==2.5.0
-    # via requests
+    # via
+    #   requests
+    #   types-requests
 virtualenv==20.34.0
     # via pre-commit
-yt-dlp==2025.8.11
-    # via playlist_search (pyproject.toml)
+yt-dlp==2025.8.27
+    # via radio_manager (pyproject.toml)
 
 # The following packages are considered to be unsafe in a requirements file:
 # pip
