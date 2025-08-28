@@ -32,51 +32,45 @@ from structlog.stdlib import ProcessorFormatter
 from structlog.typing import FilteringBoundLogger, Processor
 
 
-# ---- Public API -----------------------------------------------------------------
-
-
 def _common_processors() -> list[Processor]:
     return [
         structlog.processors.TimeStamper(fmt="iso", utc=True),
-        merge_contextvars,  # pull run_id/node_id/name from contextvars
+        merge_contextvars,
         structlog.processors.add_log_level,
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
-        structlog.processors.UnicodeDecoder(),
         structlog.processors.dict_tracebacks,
-        structlog.processors.JSONRenderer(),  # final JSON
+        structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
     ]
 
 
 def configure_logging(run_id: str | None = None) -> str:
-    """
-    Configure structlog + stdlib logging for JSON output and bind run_id.
-
-    Returns the effective run_id.
-    """
     level: int = _parse_log_level(os.getenv("LOG_LEVEL"))
     time_stamper = structlog.processors.TimeStamper(fmt="iso", utc=True)
 
-    # Route stdlib logs -> structlog ProcessorFormatter -> JSON
     formatter = ProcessorFormatter(
         processor=JSONRenderer(),
         foreign_pre_chain=[
-            merge_contextvars,  # include contextvars (e.g., run_id) in stdlib logs
+            merge_contextvars,
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
             time_stamper,
         ],
     )
 
-    handler = logging.StreamHandler(stream=sys.stderr)
-    handler.setFormatter(formatter)
+    stderr_handler = logging.StreamHandler(stream=sys.stderr)
+    stderr_handler.setFormatter(formatter)
+
+    log_path = os.getenv("LOG_FILE", "logs/manager.log")
+    file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+    file_handler.setFormatter(formatter)
 
     root = logging.getLogger()
     root.handlers.clear()
-    root.addHandler(handler)
+    root.addHandler(stderr_handler)
+    root.addHandler(file_handler)
     root.setLevel(level)
 
-    # Configure structlog to pass through the ProcessorFormatter
     structlog.configure(
         processors=_common_processors(),
         logger_factory=structlog.stdlib.LoggerFactory(),
@@ -124,9 +118,6 @@ def reset_log_context() -> None:
     clear_contextvars()
 
 
-# ---- Internals -------------------------------------------------------------------
-
-
 def _parse_log_level(value: str | None) -> int:
     if not value:
         return logging.INFO
@@ -144,5 +135,4 @@ def _parse_log_level(value: str | None) -> int:
 
 
 def _generate_run_id() -> str:
-    # Short, k8s/log-friendly correlation id
     return uuid.uuid4().hex[:12]

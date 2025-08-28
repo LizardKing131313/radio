@@ -1,5 +1,6 @@
 import asyncio
 
+from manager.hls import HLS
 from manager.liquidsoap.liquidsoap import LiquidSoap
 from manager.logger import configure_logging
 from manager.runner.control import ControlBus, ControlNode
@@ -13,7 +14,7 @@ async def start_radio() -> None:
     control_bus = ControlBus()
 
     nodes = [
-        Node(id=ControlNode.FFMPEG, runnable=LiquidSoap(node_id=ControlNode.FFMPEG)),
+        Node(id=ControlNode.FFMPEG, runnable=HLS(node_id=ControlNode.FFMPEG)),
         Node(
             id=ControlNode.LIQUID_SOAP,
             runnable=LiquidSoap(node_id=ControlNode.LIQUID_SOAP),

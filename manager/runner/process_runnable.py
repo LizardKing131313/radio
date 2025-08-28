@@ -192,10 +192,15 @@ class ProcessRunnable(Runnable, ABC):
         for task in pending:
             task.cancel()
 
+        # дождаться отмены — не даём CancelledError всплыть наружу
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
         if proc_wait in done:
             return handle.process.returncode
 
-        with contextlib.suppress(Exception):
+        # stop() сам корректно гасит отмены; на всякий случай ловим CancelledError
+        with contextlib.suppress(asyncio.CancelledError, Exception):
             await self.stop(handle, reason="shutdown", log_event=log_event)
         return None
 
@@ -241,9 +246,13 @@ class ProcessRunnable(Runnable, ABC):
             except asyncio.TimeoutError:  # noqa: UP041
                 log_event.error("proc.kill_timeout", pid=process.pid)
 
-        # 5) stop log drainers
-        for task in (handle.stdout_task, handle.stderr_task):
-            if task:
-                task.cancel()
-                with contextlib.suppress(Exception):
-                    await task
+        # 5) stop log drainers — отменяем и безопасно ждём завершения
+        drainers = [t for t in (handle.stdout_task, handle.stderr_task) if t]
+        for t in drainers:
+            t.cancel()
+        if drainers:
+            results = await asyncio.gather(*drainers, return_exceptions=True)
+            # опционально: залогировать неожиданные ошибки
+            for result in results:
+                if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
+                    log_event.warning("drainer.error", error=repr(result))
