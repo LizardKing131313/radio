@@ -33,7 +33,7 @@ class TracksRepo:
     ) -> int:
         """
         Insert-or-update by unique youtube_id, return track id.
-        Uses RETURNING where supported.
+        Uses RETURNING when available, falls back otherwise.
         """
         conn = self.db.connect()
         try:
@@ -68,7 +68,6 @@ class TracksRepo:
             row = cur.fetchone()
             return int(row[0]) if row is not None else self.get_id_by_youtube_id(youtube_id)
         except sqlite3.OperationalError:
-            # Very old SQLite without RETURNING
             pass
 
         with contextlib.suppress(sqlite3.IntegrityError):
@@ -132,7 +131,7 @@ class TracksRepo:
         )
 
 
-# --- Queue --------------------------------------------------------------------
+# --- Queue (sort_key-based ordering) -----------------------------------------
 
 
 @dataclass(frozen=True)
@@ -194,14 +193,13 @@ class QueueRepo:
         status: str = "pending",
     ) -> int:
         """
-        Low-level insert that sets sort_key explicitly.
-        Keeps 'priority' for compatibility (will be removed later).
+        Low-level insert that sets sort_key explicitly (or leaves NULL).
         """
         # noinspection SqlResolve
         cur = self.db.connect().execute(
             """
-            INSERT INTO queue_items (track_id, status, priority, requested_by, note, sort_key)
-            VALUES (?, ?, 0, ?, ?, ?)
+            INSERT INTO queue_items (track_id, status, requested_by, note, sort_key)
+            VALUES (?, ?, ?, ?, ?)
             RETURNING id
             """,
             (track_id, status, requested_by, note, sort_key),
@@ -224,7 +222,7 @@ class QueueRepo:
     ) -> int:
         """
         Enqueue a track with an explicit sort_key (or None).
-        Prefer using enqueue_next()/enqueue_after_current() for correct ordering.
+        The v3 trigger will auto-set sort_key for pending when NULL.
         """
         return self._insert_item(
             track_id,
@@ -242,18 +240,16 @@ class QueueRepo:
         note: str | None = None,
     ) -> int:
         """
-        Put as the next pending after the current top-pending.
-        Uses monotone decreasing series below 100.0 with a fixed step.
+        Place as next pending: use top_pending - STEP (explicit).
         """
-        STEP = 0.005  # RU: шаг вниз; см. RADIO-DB-13 для триггера по умолчанию
+        step = 0.005
         top = self._get_top_pending_sort_key()
         if top is None:
-            # If list empty or NULLs only, anchor below playing or use 99.99
             playing = self._get_current_playing_sort_key()
             base = playing if playing is not None else 100.0
-            new_key = base - STEP
+            new_key = base - step
         else:
-            new_key = float(top) - STEP
+            new_key = float(top) - step
         return self._insert_item(
             track_id,
             requested_by=requested_by,
@@ -270,22 +266,17 @@ class QueueRepo:
         note: str | None = None,
     ) -> int:
         """
-        Insert immediately after the currently playing item:
-        new_key = midpoint(playing.sort_key, top_pending.sort_key) if both exist,
-        else fallback to 99.995 below the playing anchor.
+        Insert immediately after the currently playing item.
         """
         playing = self._get_current_playing_sort_key()
         top = self._get_top_pending_sort_key()
         if playing is None:
-            # If no playing anchor found, assume 100.0 (migration v2 sets it)
             playing = 100.0
         if top is None:
-            # No pending → place slightly below playing
             new_key = playing - 0.005
         else:
-            # Midpoint between anchors
             new_key = (playing + top) / 2.0
-            if not (top < playing):  # Safety: if order is inverted, nudge below playing
+            if not (top < playing):
                 new_key = playing - 0.0025
         return self._insert_item(
             track_id,
@@ -315,6 +306,7 @@ class QueueRepo:
         return QueueItem.from_row(row), Track.from_row(row)
 
     def peek_next(self) -> tuple[QueueItem, Track] | None:
+        # noinspection SqlResolve
         row = (
             self.db.connect()
             .execute(
@@ -323,7 +315,7 @@ class QueueRepo:
             FROM queue_items qi
                      JOIN tracks t ON t.id = qi.track_id
             WHERE qi.status = 'pending'
-            ORDER BY (qi.sort_key IS NULL) ASC, qi.sort_key DESC, qi.id ASC
+            ORDER BY (qi.sort_key IS NULL), qi.sort_key DESC, qi.id
             LIMIT 1
             """
             )
@@ -342,10 +334,11 @@ class QueueRepo:
             """,
             (queue_id,),
         )
-        # Triggers (v2) will set started_at.
+        # v2/v3 triggers will set started_at.
 
     def mark_done(self, queue_id: int, *, skipped: bool = False) -> None:
         status = "skipped" if skipped else "done"
+        # noinspection SqlResolve
         self.db.connect().execute(
             """
             UPDATE queue_items
@@ -354,13 +347,14 @@ class QueueRepo:
             """,
             (status, queue_id),
         )
-        # Triggers (v2) will set finished_at.
+        # v2/v3 triggers will set finished_at.
 
     def list_visible(self, limit: int = 100) -> list[tuple[QueueItem, Track]]:
         """
         Visible to users: 'playing' first, then 'pending' by sort_key desc.
         Keep NULL sort_key after non-NULL (simulate NULLS LAST for DESC).
         """
+        # noinspection SqlResolve
         rows = (
             self.db.connect()
             .execute(
@@ -370,10 +364,10 @@ class QueueRepo:
                      JOIN tracks t ON t.id = qi.track_id
             WHERE qi.status IN ('playing','pending')
             ORDER BY
-                CASE qi.status WHEN 'playing' THEN 1 ELSE 2 END ASC,
-                (qi.sort_key IS NULL) ASC,
+                CASE qi.status WHEN 'playing' THEN 1 ELSE 2 END,
+                (qi.sort_key IS NULL),
                 qi.sort_key DESC,
-                qi.id ASC
+                qi.id
             LIMIT ?
             """,
                 (limit,),
@@ -503,6 +497,7 @@ class OffersRepo:
         duration_sec: int | None = None,
         channel: str | None = None,
     ) -> None:
+        # noinspection SqlResolve
         self.db.connect().execute(
             """
             UPDATE offers
@@ -513,4 +508,26 @@ class OffersRepo:
             WHERE id = ?
             """,
             (youtube_id, title, duration_sec, channel, offer_id),
+        )
+
+    def soft_delete(self, track_id: int) -> None:
+        # noinspection SqlResolve
+        self.db.connect().execute(
+            """
+            UPDATE tracks
+            SET deleted_at = (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            WHERE id = ? AND deleted_at IS NULL
+            """,
+            (track_id,),
+        )
+
+    def restore(self, track_id: int) -> None:
+        # noinspection SqlResolve
+        self.db.connect().execute(
+            """
+            UPDATE tracks
+            SET deleted_at = NULL
+            WHERE id = ?
+            """,
+            (track_id,),
         )
