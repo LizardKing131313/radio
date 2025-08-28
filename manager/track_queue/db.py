@@ -74,6 +74,70 @@ MIGRATIONS: list[tuple[int, str]] = [
             ON offers(status, created_at DESC);
         """,  # noqa: E501
     ),
+    # v2 — anti-spam + sort_key + triggers
+    (
+        2,
+        """
+        PRAGMA foreign_keys=ON;
+
+        -- 5) Anti-spam: allow only one 'pending' item per track at a time.
+        -- Requires SQLite 3.8+ (partial indexes).
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_queue_pending_unique_track
+        ON queue_items(track_id)
+        WHERE status = 'pending';
+
+        -- 7) Stable ordering key to enable infinite "insert after current" without re-numbering.
+        ALTER TABLE queue_items ADD COLUMN sort_key REAL;
+
+        -- Backfill sort_key:
+        --  - 'playing' gets 100.0 (the "top" anchor);
+        --  - 'pending' get descending values below 100.0 by current order;
+        --  - others remain NULL.
+        UPDATE queue_items
+           SET sort_key = 100.0
+         WHERE status = 'playing' AND sort_key IS NULL;
+
+        CREATE TEMP TABLE q_order(id INTEGER PRIMARY KEY, rn INTEGER);
+        INSERT INTO q_order
+        SELECT id,
+               ROW_NUMBER() OVER (
+                 ORDER BY priority DESC, enqueued_at ASC, id ASC
+               ) AS rn
+          FROM queue_items
+         WHERE status = 'pending';
+
+        UPDATE queue_items
+           SET sort_key = 100.0 - 0.01 * (SELECT rn FROM q_order WHERE q_order.id = queue_items.id)
+         WHERE id IN (SELECT id FROM q_order) AND sort_key IS NULL;
+
+        DROP TABLE q_order;
+
+        -- Helpful indexes for new ordering:
+        CREATE INDEX IF NOT EXISTS idx_queue_status_sort
+          ON queue_items(status, sort_key DESC);
+
+        -- 8) Triggers for timestamp consistency on status changes.
+        -- When a row becomes 'playing' and started_at is not set, stamp it.
+        CREATE TRIGGER IF NOT EXISTS trg_queue_started
+        AFTER UPDATE OF status ON queue_items
+        WHEN NEW.status = 'playing' AND NEW.started_at IS NULL
+        BEGIN
+            UPDATE queue_items
+               SET started_at = (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+             WHERE id = NEW.id;
+        END;
+
+        -- When a row becomes 'done' or 'skipped' and finished_at is not set, stamp it.
+        CREATE TRIGGER IF NOT EXISTS trg_queue_finished
+        AFTER UPDATE OF status ON queue_items
+        WHEN NEW.status IN ('done','skipped') AND NEW.finished_at IS NULL
+        BEGIN
+            UPDATE queue_items
+               SET finished_at = (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+             WHERE id = NEW.id;
+        END;
+        """,
+    ),
 ]
 
 

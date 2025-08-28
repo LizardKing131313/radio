@@ -18,6 +18,7 @@ class Paths(BaseModel):
 
     base: Path = Path("/opt/radio")
     data: Path = base / "data"
+    data_base: Path = data / "radio.sqlite"
     cache_cold: Path = base / "cache" / "cold"
     cache_hot: Path = base / "cache" / "hot"
     runtime_fifo_dir: Path = base / "runtime" / "fifo"

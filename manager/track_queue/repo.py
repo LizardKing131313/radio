@@ -68,11 +68,10 @@ class TracksRepo:
             row = cur.fetchone()
             return int(row[0]) if row is not None else self.get_id_by_youtube_id(youtube_id)
         except sqlite3.OperationalError:
-            # Fallback for very old SQLite without RETURNING
+            # Very old SQLite without RETURNING
             pass
 
         with contextlib.suppress(sqlite3.IntegrityError):
-            # noinspection SqlResolve
             conn.execute(
                 """
                 INSERT INTO tracks (youtube_id, title, duration_sec, url, channel, thumbnail_url, audio_path, loudness_lufs, is_active)
@@ -140,28 +139,100 @@ class TracksRepo:
 class QueueRepo:
     db: Database
 
-    def enqueue(
+    # ---- helpers (internal) ----
+
+    def _get_top_pending_sort_key(self) -> float | None:
+        """
+        Returns the highest sort_key among 'pending'. If none or all NULL -> None.
+        """
+        # noinspection SqlResolve
+        row = (
+            self.db.connect()
+            .execute(
+                """
+            SELECT sort_key
+            FROM queue_items
+            WHERE status = 'pending'
+            ORDER BY sort_key DESC
+            LIMIT 1
+            """
+            )
+            .fetchone()
+        )
+        if row is None:
+            return None
+        val = row["sort_key"]
+        return float(val) if val is not None else None
+
+    def _get_current_playing_sort_key(self) -> float | None:
+        # noinspection SqlResolve
+        row = (
+            self.db.connect()
+            .execute(
+                """
+            SELECT sort_key
+            FROM queue_items
+            WHERE status = 'playing'
+            ORDER BY started_at DESC
+            LIMIT 1
+            """
+            )
+            .fetchone()
+        )
+        if row is None:
+            return None
+        v = row["sort_key"]
+        return float(v) if v is not None else None
+
+    def _insert_item(
         self,
         track_id: int,
         *,
-        requested_by: str | None = None,
-        note: str | None = None,
-        priority: int = 0,
+        requested_by: str | None,
+        note: str | None,
+        sort_key: float | None,
+        status: str = "pending",
     ) -> int:
+        """
+        Low-level insert that sets sort_key explicitly.
+        Keeps 'priority' for compatibility (will be removed later).
+        """
         # noinspection SqlResolve
         cur = self.db.connect().execute(
             """
-            INSERT INTO queue_items (track_id, status, priority, requested_by, note)
-            VALUES (?, 'pending', ?, ?, ?)
-                RETURNING id
+            INSERT INTO queue_items (track_id, status, priority, requested_by, note, sort_key)
+            VALUES (?, ?, 0, ?, ?, ?)
+            RETURNING id
             """,
-            (track_id, priority, requested_by, note),
+            (track_id, status, requested_by, note, sort_key),
         )
         row = cur.fetchone()
         if row is None:
             cur2 = self.db.connect().execute("SELECT last_insert_rowid()")
             return int(cur2.fetchone()[0])
         return int(row[0])
+
+    # ---- public API ----
+
+    def enqueue(
+        self,
+        track_id: int,
+        *,
+        requested_by: str | None = None,
+        note: str | None = None,
+        sort_key: float | None = None,
+    ) -> int:
+        """
+        Enqueue a track with an explicit sort_key (or None).
+        Prefer using enqueue_next()/enqueue_after_current() for correct ordering.
+        """
+        return self._insert_item(
+            track_id,
+            requested_by=requested_by,
+            note=note,
+            sort_key=sort_key,
+            status="pending",
+        )
 
     def enqueue_next(
         self,
@@ -170,25 +241,61 @@ class QueueRepo:
         requested_by: str | None = None,
         note: str | None = None,
     ) -> int:
-        # Берём максимальный priority среди pending и ставим +1
-        # noinspection SqlResolve
-        row = (
-            self.db.connect()
-            .execute(
-                "SELECT COALESCE(MAX(priority), 0) AS p FROM queue_items WHERE status = 'pending'"
-            )
-            .fetchone()
-        )
-        next_priority = int(row["p"]) + 1 if row is not None else 1
-        return self.enqueue(
+        """
+        Put as the next pending after the current top-pending.
+        Uses monotone decreasing series below 100.0 with a fixed step.
+        """
+        STEP = 0.005  # RU: шаг вниз; см. RADIO-DB-13 для триггера по умолчанию
+        top = self._get_top_pending_sort_key()
+        if top is None:
+            # If list empty or NULLs only, anchor below playing or use 99.99
+            playing = self._get_current_playing_sort_key()
+            base = playing if playing is not None else 100.0
+            new_key = base - STEP
+        else:
+            new_key = float(top) - STEP
+        return self._insert_item(
             track_id,
             requested_by=requested_by,
             note=note,
-            priority=next_priority,
+            sort_key=new_key,
+            status="pending",
+        )
+
+    def enqueue_after_current(
+        self,
+        track_id: int,
+        *,
+        requested_by: str | None = None,
+        note: str | None = None,
+    ) -> int:
+        """
+        Insert immediately after the currently playing item:
+        new_key = midpoint(playing.sort_key, top_pending.sort_key) if both exist,
+        else fallback to 99.995 below the playing anchor.
+        """
+        playing = self._get_current_playing_sort_key()
+        top = self._get_top_pending_sort_key()
+        if playing is None:
+            # If no playing anchor found, assume 100.0 (migration v2 sets it)
+            playing = 100.0
+        if top is None:
+            # No pending → place slightly below playing
+            new_key = playing - 0.005
+        else:
+            # Midpoint between anchors
+            new_key = (playing + top) / 2.0
+            if not (top < playing):  # Safety: if order is inverted, nudge below playing
+                new_key = playing - 0.0025
+        return self._insert_item(
+            track_id,
+            requested_by=requested_by,
+            note=note,
+            sort_key=new_key,
+            status="pending",
         )
 
     def current_playing(self) -> tuple[QueueItem, Track] | None:
-        # noinspection SqlResolve
         row = (
             self.db.connect()
             .execute(
@@ -205,12 +312,9 @@ class QueueRepo:
         )
         if row is None:
             return None
-        qi = QueueItem.from_row(row)
-        t = Track.from_row(row)
-        return qi, t
+        return QueueItem.from_row(row), Track.from_row(row)
 
     def peek_next(self) -> tuple[QueueItem, Track] | None:
-        # noinspection SqlResolve
         row = (
             self.db.connect()
             .execute(
@@ -219,7 +323,7 @@ class QueueRepo:
             FROM queue_items qi
                      JOIN tracks t ON t.id = qi.track_id
             WHERE qi.status = 'pending'
-            ORDER BY qi.priority DESC, qi.enqueued_at, qi.id
+            ORDER BY (qi.sort_key IS NULL) ASC, qi.sort_key DESC, qi.id ASC
             LIMIT 1
             """
             )
@@ -230,33 +334,33 @@ class QueueRepo:
         return QueueItem.from_row(row), Track.from_row(row)
 
     def mark_playing(self, queue_id: int) -> None:
-        conn = self.db.connect()
-        # noinspection SqlResolve
-        conn.execute(
+        self.db.connect().execute(
             """
             UPDATE queue_items
-            SET status='playing',
-                started_at=(strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            SET status='playing'
             WHERE id=? AND status IN ('pending','skipped')
             """,
             (queue_id,),
         )
+        # Triggers (v2) will set started_at.
 
     def mark_done(self, queue_id: int, *, skipped: bool = False) -> None:
         status = "skipped" if skipped else "done"
-        # noinspection SqlResolve
         self.db.connect().execute(
             """
             UPDATE queue_items
-            SET status=?,
-                finished_at=(strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            SET status=?
             WHERE id=?
             """,
             (status, queue_id),
         )
+        # Triggers (v2) will set finished_at.
 
     def list_visible(self, limit: int = 100) -> list[tuple[QueueItem, Track]]:
-        # noinspection SqlResolve
+        """
+        Visible to users: 'playing' first, then 'pending' by sort_key desc.
+        Keep NULL sort_key after non-NULL (simulate NULLS LAST for DESC).
+        """
         rows = (
             self.db.connect()
             .execute(
@@ -266,11 +370,11 @@ class QueueRepo:
                      JOIN tracks t ON t.id = qi.track_id
             WHERE qi.status IN ('playing','pending')
             ORDER BY
-                CASE qi.status WHEN 'playing' THEN 1 ELSE 2 END,
-                qi.priority DESC,
-                qi.enqueued_at,
-                qi.id
-                LIMIT ?
+                CASE qi.status WHEN 'playing' THEN 1 ELSE 2 END ASC,
+                (qi.sort_key IS NULL) ASC,
+                qi.sort_key DESC,
+                qi.id ASC
+            LIMIT ?
             """,
                 (limit,),
             )
@@ -282,9 +386,10 @@ class QueueRepo:
         return result
 
     def cleanup_done(self, keep: int = 500) -> int:
-        # Хвост истории чистим: оставляем последние N done/skipped по finished_at
+        """
+        Trim history of done/skipped items leaving last N by finished_at / enqueued_at.
+        """
         conn = self.db.connect()
-        # noinspection SqlResolve
         row = conn.execute(
             """
             WITH ordered AS (
@@ -311,12 +416,11 @@ class OffersRepo:
     def add(
         self, youtube_url: str, *, submitted_by: str | None = None, note: str | None = None
     ) -> int:
-        # noinspection SqlResolve
         cur = self.db.connect().execute(
             """
             INSERT INTO offers (youtube_url, submitted_by, note)
             VALUES (?, ?, ?)
-                RETURNING id
+            RETURNING id
             """,
             (youtube_url, submitted_by, note),
         )
@@ -327,7 +431,6 @@ class OffersRepo:
         return int(r[0])
 
     def get_by_url(self, youtube_url: str) -> Offer | None:
-        # noinspection SqlResolve
         row = (
             self.db.connect()
             .execute(
@@ -340,7 +443,6 @@ class OffersRepo:
 
     def list(self, *, status: str | None = None, limit: int = 200) -> list[Offer]:
         if status:
-            # noinspection SqlResolve
             rows = (
                 self.db.connect()
                 .execute(
@@ -348,21 +450,20 @@ class OffersRepo:
                 SELECT * FROM offers
                 WHERE status = ?
                 ORDER BY created_at DESC
-                    LIMIT ?
+                LIMIT ?
                 """,
                     (status, limit),
                 )
                 .fetchall()
             )
         else:
-            # noinspection SqlResolve
             rows = (
                 self.db.connect()
                 .execute(
                     """
                 SELECT * FROM offers
                 ORDER BY created_at DESC
-                    LIMIT ?
+                LIMIT ?
                 """,
                     (limit,),
                 )
@@ -371,7 +472,6 @@ class OffersRepo:
         return [Offer.from_row(r) for r in rows]
 
     def accept(self, offer_id: int, track_id: int) -> None:
-        # noinspection SqlResolve
         self.db.connect().execute(
             """
             UPDATE offers
@@ -384,7 +484,6 @@ class OffersRepo:
         )
 
     def cancel(self, offer_id: int) -> None:
-        # noinspection SqlResolve
         self.db.connect().execute(
             """
             UPDATE offers
@@ -404,7 +503,6 @@ class OffersRepo:
         duration_sec: int | None = None,
         channel: str | None = None,
     ) -> None:
-        # noinspection SqlResolve
         self.db.connect().execute(
             """
             UPDATE offers
