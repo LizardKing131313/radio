@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from functools import cached_property
+from typing import ClassVar
 
 from structlog.typing import FilteringBoundLogger
 
@@ -22,7 +23,7 @@ from manager.runner.process_runnable import ProcessCommand, ProcessRunnable
 
 class LiquidSoap(ProcessRunnable):
 
-    health_interval_sec: float = 5.0
+    health_interval_sec: ClassVar[float] = 5.0
 
     def __init__(self, node_id: ControlNode, config: AppConfig | None = None) -> None:
         super().__init__(node_id=node_id)

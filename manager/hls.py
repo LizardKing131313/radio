@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from functools import cached_property
+from typing import ClassVar
 
 from structlog.typing import FilteringBoundLogger
 
@@ -12,6 +14,9 @@ from manager.runner.process_runnable import ProcessCommand, ProcessRunnable
 
 
 class HLS(ProcessRunnable):
+
+    health_interval_sec: ClassVar[float] = 10.0
+
     def __init__(self, node_id: ControlNode, config: AppConfig | None = None) -> None:
         super().__init__(node_id=node_id)
         self.node_id = node_id
@@ -82,15 +87,30 @@ class HLS(ProcessRunnable):
     # fmt: on
 
     def get_ready_action(self) -> Action | None:
+        fifo_path = str(self.config.paths.fifo_audio_path)
+
         async def _run() -> ControlResult:
-            return Success("OK")
+            # Do not poke FIFO writer-side here at all.
+            if not os.path.exists(fifo_path):
+                return Success(f"FIFO not found yet: {fifo_path}")
+            # Consider HLS 'ready' when ffmpeg process is up; runner already tracks proc.started.
+            return Success("HLS ready check: skipped destructive FIFO probe.")
 
         return _run
 
     async def check(
         self, ready_event: asyncio.Event, log_event: FilteringBoundLogger
     ) -> ControlResult:
-        return Success("OK")
+        fifo_path = str(self.config.paths.fifo_audio_path)
+        # Safe, non-destructive probe:
+        # open read end NONBLOCK just to ensure FIFO exists and is accessible.
+        try:
+            fd = os.open(fifo_path, os.O_RDONLY | os.O_NONBLOCK)  # type: ignore[attr-defined]
+            os.close(fd)
+            return Success("OK: FIFO accessible (non-blocking read).")
+        except OSError as e:
+            # Still do not fail the node here; just report.
+            return Success(f"NOTE: FIFO read-probe errno={e.errno} ({e.strerror})")
 
     async def receive(
         self, ready_event: asyncio.Event, message: ControlMessage, log_event: FilteringBoundLogger

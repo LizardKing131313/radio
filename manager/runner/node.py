@@ -5,7 +5,7 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import ClassVar, Protocol
 
 from structlog.typing import FilteringBoundLogger
 
@@ -43,7 +43,7 @@ class Runnable(ABC):
     node_id: ControlNode
 
     # интервал автоматического вызова check
-    health_interval_sec: float = 0.0
+    health_interval_sec: ClassVar[float] = 0.0
 
     # количество перезапусков при ошибке чека
     health_fail_threshold: int = 3
