@@ -72,9 +72,11 @@ class Telnet:
             total = 0
             lines: list[str] = []
             while len(lines) < self.max_lines and total < self.max_total_bytes:
+                # noinspection PyUnresolvedReferences
                 line = await asyncio.wait_for(reader.readline(), timeout=self.per_line_timeout_sec)
                 if not line:
                     break
+                # noinspection PyUnresolvedReferences
                 s = line.decode(errors="replace").rstrip("\r\n")
                 if s == "END":
                     break
@@ -95,19 +97,74 @@ class Telnet:
                 writer.close()
                 await writer.wait_closed()
 
-    # ----- sugar methods -----
+    async def help(self) -> ControlResult:
+        return await self.command("help")
 
     async def version(self) -> ControlResult:
         return await self.command("version")
 
-    async def help(self) -> ControlResult:
-        return await self.command("help")
+    async def uptime(self) -> ControlResult:
+        return await self.command("uptime")
 
-    async def skip(self) -> ControlResult:
-        return await self.command("request.skip")
+    async def cold_next(self) -> ControlResult:
+        return await self.command("cold.next")
 
-    async def push(self, uri: str) -> ControlResult:
-        return await self.command(f"request.push {uri}")
+    async def cold_reload(self) -> ControlResult:
+        return await self.command("cold.reload")
 
-    async def vars(self) -> ControlResult:
-        return await self.command("vars")
+    async def cold_skip(self) -> ControlResult:
+        return await self.command("cold.skip")
+
+    async def cold_url(self, uri: str) -> ControlResult:
+        return await self.command(f"cold.uri {uri}")
+
+    async def hot_next(self) -> ControlResult:
+        return await self.command("hot.next")
+
+    async def hot_reload(self) -> ControlResult:
+        return await self.command("hot.reload")
+
+    async def hot_skip(self) -> ControlResult:
+        return await self.command("hot.skip")
+
+    async def hot_uri(self, uri: str) -> ControlResult:
+        return await self.command(f"hot.uri {uri}")
+
+    async def output_file_metadata(self) -> ControlResult:
+        return await self.command("output_file.metadata")
+
+    async def output_file_remaining(self) -> ControlResult:
+        return await self.command("output_file.remaining")
+
+    async def output_file_skip(self) -> ControlResult:
+        return await self.command("output_file.skip")
+
+    async def request_alive(self) -> ControlResult:
+        return await self.command("request.alive")
+
+    async def request_all(self) -> ControlResult:
+        return await self.command("request.all")
+
+    async def request_metadata(self, rid: str) -> ControlResult:
+        return await self.command(f"request.metadata {rid}")
+
+    async def request_on_air(self) -> ControlResult:
+        return await self.command("request.on_air")
+
+    async def request_resolving(self) -> ControlResult:
+        return await self.command("request.resolving")
+
+    async def request_trace(self, rid: str) -> ControlResult:
+        return await self.command(f"request.trace {rid}")
+
+    async def rq_flush_and_skip(self) -> ControlResult:
+        return await self.command("rq.flush_and_skip")
+
+    async def rq_push(self, uri: str) -> ControlResult:
+        return await self.command(f"rq.push {uri}")
+
+    async def rq_queue(self) -> ControlResult:
+        return await self.command("rq.queue")
+
+    async def rq_skip(self) -> ControlResult:
+        return await self.command("rq.skip")

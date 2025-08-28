@@ -69,12 +69,12 @@ class LiquidSoap(ProcessRunnable):
     ) -> ControlResult:
         match message.action:
             case ControlAction.SKIP:
-                return await self.telnet.skip()
+                return await self.telnet.hot_skip()
             case ControlAction.PUSH:
-                return await self.telnet.push(message.payload)
+                return await self.telnet.hot_uri(message.payload)
             case ControlAction.POP:
-                return await self.telnet.skip()
+                return await self.telnet.hot_next()
             case ControlAction.QUEUE:
-                return await self.telnet.vars()
+                return await self.telnet.rq_queue()
             case _:
                 return Error("unknown action")
