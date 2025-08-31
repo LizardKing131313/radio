@@ -5,13 +5,13 @@ import contextlib
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Coroutine
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from structlog.typing import FilteringBoundLogger
 
-from manager.runner.control import ControlResult, Error, Success
-from manager.runner.node import NodeHandle, Runnable
+from manager.runner.control import ControlMessage, ControlResult, Error, Success
+from manager.runner.node import Action, NodeHandle, Runnable
 
 
 ServiceRun = Callable[
@@ -34,15 +34,15 @@ class ServiceHandle(NodeHandle):
 
 @dataclass(slots=True)
 class ServiceRunnable(Runnable, ABC):
-    """Выполняемый сервис"""
+    """Service runner wrapper."""
 
-    _stop_event: asyncio.Event
-    _ready_event_external: asyncio.Event
+    _stop_event: asyncio.Event = field(init=False)
+    _ready_event_external: asyncio.Event = field(init=False)
 
     async def start(
         self, log_event: FilteringBoundLogger, log_out: FilteringBoundLogger
     ) -> NodeHandle | None:
-        run = self.get_service_run()
+        run = self._get_service_run()
         if run is None:
             log_event.error("service start error", name=self.name, error="No run method provided")
             return None
@@ -54,12 +54,25 @@ class ServiceRunnable(Runnable, ABC):
         task = asyncio.create_task(run_task, name=f"svc:{self.node_id}")
 
         self.backoff_state.register_start()
-
         log_event.info("service started", name=self.name)
         return ServiceHandle(started_monotonic=time.monotonic(), task=task)
 
+    def _get_ready_action(self) -> Action | None:  # pragma: no cover
+        # Optional hook: override when the node needs a custom "ready" action
+        return None
+
     @abstractmethod
-    def get_service_run(self) -> ServiceRun | None: ...
+    def _get_service_run(self) -> ServiceRun | None: ...
+
+    @abstractmethod
+    async def check(
+        self, ready_event: asyncio.Event, log_event: FilteringBoundLogger
+    ) -> ControlResult: ...
+
+    @abstractmethod
+    async def receive(
+        self, ready_event: asyncio.Event, message: ControlMessage, log_event: FilteringBoundLogger
+    ) -> ControlResult: ...
 
     async def mark_ready(
         self, ready_event: asyncio.Event, log_event: FilteringBoundLogger
@@ -80,7 +93,7 @@ class ServiceRunnable(Runnable, ABC):
     async def wait_or_shutdown(
         self, handle: NodeHandle, shutdown_event: asyncio.Event, log_event: FilteringBoundLogger
     ) -> int | None:
-        """Wait until process exits or shutdown requested."""
+        """Wait until service task exits or shutdown requested."""
         assert isinstance(handle, ServiceHandle)
 
         proc_wait = handle.task
@@ -91,21 +104,40 @@ class ServiceRunnable(Runnable, ABC):
             {proc_wait, shut_wait}, return_when=asyncio.FIRST_COMPLETED
         )
 
+        # Cancel the branch that didn't finish and drain it cleanly
         for task in pending:
             task.cancel()
+        for task in pending:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
 
+        # If shutdown requested first, ask the service to stop
         with contextlib.suppress(Exception):
             await self.stop(handle, reason="shutdown", log_event=log_event)
         return None
 
     async def stop(self, handle: NodeHandle, reason: str, log_event: FilteringBoundLogger) -> None:
+        """Signal service to stop and wait for its task to finish gracefully."""
         assert isinstance(handle, ServiceHandle)
+
+        # idempotent: multiple stop() calls are fine
+        if not hasattr(self, "_stop_event"):
+            self._stop_event = asyncio.Event()
+
         self._stop_event.set()
         try:
-            await asyncio.wait_for(handle.task, timeout=self.stop_timeout_sec)
+            # Shield prevents outer cancellations from propagating into the service task
+            await asyncio.wait_for(asyncio.shield(handle.task), timeout=self.stop_timeout_sec)
             log_event.info("service stopped", name=self.name, reason=reason)
-        except asyncio.TimeoutError:  # noqa: UP041
-            handle.task.cancel()
-            with contextlib.suppress(Exception):
+        except asyncio.CancelledError:
+            # The task itself was already cancelled elsewhere — treat as graceful cancel
+            log_event.warning("service task cancelled", name=self.name, reason=reason)
+            # Best-effort drain to silence warnings
+            with contextlib.suppress(Exception, asyncio.CancelledError):
                 await handle.task
-            log_event.warning("service cancelled", name=self.name, reason=reason)
+        except asyncio.TimeoutError:  # noqa: UP041
+            # Timed out: cancel task and drain
+            handle.task.cancel()
+            with contextlib.suppress(Exception, asyncio.CancelledError):
+                await handle.task
+            log_event.warning("service cancelled by timeout", name=self.name, reason=reason)

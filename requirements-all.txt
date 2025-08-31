@@ -142,7 +142,7 @@ rich==14.1.0
     # via
     #   pip-audit
     #   typer
-ruff==0.12.10
+ruff==0.12.11
     # via radio_manager (pyproject.toml)
 shellingham==1.5.4
     # via typer

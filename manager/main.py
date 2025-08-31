@@ -6,6 +6,8 @@ from manager.logger import configure_logging
 from manager.runner.control import ControlBus, ControlNode
 from manager.runner.node import Node
 from manager.runner.runner import Runner
+from manager.search.search_service import SearchService
+from manager.track_queue.repo_service import RepoService
 
 
 async def start_radio() -> None:
@@ -14,6 +16,12 @@ async def start_radio() -> None:
     control_bus = ControlBus()
 
     nodes = [
+        Node(id=ControlNode.DB, runnable=RepoService(node_id=ControlNode.DB)),
+        Node(
+            id=ControlNode.SEARCH,
+            runnable=SearchService(node_id=ControlNode.SEARCH, control_bus=control_bus),
+            parent={ControlNode.DB},
+        ),
         Node(id=ControlNode.FFMPEG, runnable=HLS(node_id=ControlNode.FFMPEG)),
         Node(
             id=ControlNode.LIQUID_SOAP,

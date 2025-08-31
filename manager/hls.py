@@ -20,7 +20,7 @@ class HLS(ProcessRunnable):
     def __init__(self, node_id: ControlNode, config: AppConfig | None = None) -> None:
         super().__init__(node_id=node_id)
         self.node_id = node_id
-        self.config = config or get_settings()
+        self._config = config or get_settings()
 
     # fmt: off
     @cached_property
@@ -29,29 +29,29 @@ class HLS(ProcessRunnable):
             exe="/usr/bin/ffmpeg",
             args=[
                 "-nostdin", "-hide_banner", "-loglevel", "warning",
-                "-i", str(self.config.paths.fifo_audio_path),
+                "-i", str(self._config.paths.fifo_audio_path),
 
                 # --- TS ---
                 *self._build_audio_args(),
                 "-f", "hls",
-                "-hls_time", str(self.config.hls.hls_time),
-                "-hls_list_size", str(self.config.hls.hls_list_size),
-                "-hls_delete_threshold", str(self.config.hls.hls_delete_threshold),
+                "-hls_time", str(self._config.hls.hls_time),
+                "-hls_list_size", str(self._config.hls.hls_list_size),
+                "-hls_delete_threshold", str(self._config.hls.hls_delete_threshold),
                 "-hls_flags", "independent_segments+append_list+delete_segments",
                 "-hls_start_number_source", "epoch",
                 "-master_pl_name", "playlist.m3u8",
                 "-var_stream_map",  self._stream_map(),
                 "-hls_segment_type", "mpegts",
                 "-hls_segment_filename",
-                str(self.config.paths.www_hls_ts / "v%v" / "seg_%05d.ts"),
-                str(self.config.paths.www_hls_ts / "v%v" / "index.m3u8"),
+                str(self._config.paths.www_hls_ts / "v%v" / "seg_%05d.ts"),
+                str(self._config.paths.www_hls_ts / "v%v" / "index.m3u8"),
 
                 # --- CMAF ---
                 *self._build_audio_args(),
                 "-f", "hls",
-                "-hls_time", str(self.config.hls.hls_time),
-                "-hls_list_size", str(self.config.hls.hls_list_size),
-                "-hls_delete_threshold", str(self.config.hls.hls_delete_threshold),
+                "-hls_time", str(self._config.hls.hls_time),
+                "-hls_list_size", str(self._config.hls.hls_list_size),
+                "-hls_delete_threshold", str(self._config.hls.hls_delete_threshold),
                 "-hls_flags", "independent_segments+omit_endlist+append_list+delete_segments",
                 "-hls_start_number_source", "epoch",
                 "-master_pl_name", "playlist.m3u8",
@@ -59,22 +59,22 @@ class HLS(ProcessRunnable):
                 "-hls_segment_type", "fmp4",
                 "-hls_fmp4_init_filename", "init.mp4",
                 "-hls_segment_filename",
-                str(self.config.paths.www_hls_mp4 / "v%v" / "seg_%05d.m4s"),
-                str(self.config.paths.www_hls_mp4 / "v%v" / "index.m3u8"),
+                str(self._config.paths.www_hls_mp4 / "v%v" / "seg_%05d.m4s"),
+                str(self._config.paths.www_hls_mp4 / "v%v" / "index.m3u8"),
             ]
     )
     # fmt: on
 
     def _stream_map(self) -> str:
         return " ".join(
-            f"a:{i},name:{bitrate}k" for i, bitrate in enumerate(self.config.hls.bitrates)
+            f"a:{i},name:{bitrate}k" for i, bitrate in enumerate(self._config.hls.bitrates)
         )
 
     # fmt: off
     def _build_audio_args(self) -> list[str]:
         return [
             arg
-            for i, bitrate in enumerate(self.config.hls.bitrates)
+            for i, bitrate in enumerate(self._config.hls.bitrates)
             for arg in (
                 "-map", "0:a",
                 f"-c:a:{i}", "aac",
@@ -86,8 +86,8 @@ class HLS(ProcessRunnable):
         ]
     # fmt: on
 
-    def get_ready_action(self) -> Action | None:
-        fifo_path = str(self.config.paths.fifo_audio_path)
+    def _get_ready_action(self) -> Action | None:
+        fifo_path = str(self._config.paths.fifo_audio_path)
 
         async def _run() -> ControlResult:
             # Do not poke FIFO writer-side here at all.
@@ -101,7 +101,7 @@ class HLS(ProcessRunnable):
     async def check(
         self, ready_event: asyncio.Event, log_event: FilteringBoundLogger
     ) -> ControlResult:
-        fifo_path = str(self.config.paths.fifo_audio_path)
+        fifo_path = str(self._config.paths.fifo_audio_path)
         # Safe, non-destructive probe:
         # open read end NONBLOCK just to ensure FIFO exists and is accessible.
         try:

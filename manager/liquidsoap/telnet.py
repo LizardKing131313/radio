@@ -17,19 +17,13 @@ class Telnet:
     """
 
     def __init__(self, config: AppConfig | None = None) -> None:
-        self.config = config or get_settings()
-        self.connect_timeout_sec: float = self.config.liquidsoap.connect_timeout_sec
-        self.command_timeout_sec: float = self.config.liquidsoap.command_timeout_sec
-        self.per_line_timeout_sec: float = self.config.liquidsoap.per_line_timeout_sec
-        self.max_lines: int = self.config.liquidsoap.max_lines
-        self.max_total_bytes: int = self.config.liquidsoap.max_total_bytes
-        self.host: str = self.config.liquidsoap.telnet_host
-        self.port: int = self.config.liquidsoap.telnet_port
+        self._config = config or get_settings()
+        self._settings = self._config.liquidsoap
 
     async def _open(self) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
         reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(self.host, self.port),
-            timeout=self.connect_timeout_sec,
+            asyncio.open_connection(self._settings.telnet_host, self._settings.telnet_port),
+            timeout=self._settings.connect_timeout_sec,
         )
         return reader, writer
 
@@ -71,9 +65,11 @@ class Telnet:
 
             total = 0
             lines: list[str] = []
-            while len(lines) < self.max_lines and total < self.max_total_bytes:
+            while len(lines) < self._settings.max_lines and total < self._settings.max_total_bytes:
                 # noinspection PyUnresolvedReferences
-                line = await asyncio.wait_for(reader.readline(), timeout=self.per_line_timeout_sec)
+                line = await asyncio.wait_for(
+                    reader.readline(), timeout=self._settings.per_line_timeout_sec
+                )
                 if not line:
                     break
                 # noinspection PyUnresolvedReferences

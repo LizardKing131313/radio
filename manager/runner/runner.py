@@ -24,51 +24,51 @@ class Runner:
         if not nodes:
             raise ValueError("At least one Node is required")
 
-        self.control_bus = control_bus
+        self._control_bus = control_bus
         self._kick_event: asyncio.Event = asyncio.Event()
         # Context: propagate run_id to all tasks created after this point
-        self.run_id: str = run_id
-        bind_contextvars(run_id=self.run_id)
+        self._run_id: str = run_id
+        bind_contextvars(run_id=self._run_id)
 
         # Dedicated loggers
         self.log_event: FilteringBoundLogger = get_logger("proc.event")
         self.log_out: FilteringBoundLogger = get_logger("proc.out")
 
         # Index nodes
-        self.node_map: dict[ControlNode, Node] = {node.id: node for node in nodes}
-        if len(self.node_map) != len(nodes):
+        self._node_map: dict[ControlNode, Node] = {node.id: node for node in nodes}
+        if len(self._node_map) != len(nodes):
             raise ValueError("Duplicate node IDs are not allowed")
 
         # Graph: parents (deps) and children (reverse edges)
-        self.parents: dict[ControlNode, set[ControlNode]] = {
+        self._parents: dict[ControlNode, set[ControlNode]] = {
             node.id: set(node.parent) for node in nodes
         }
-        self.children: dict[ControlNode, set[ControlNode]] = defaultdict(set)
+        self._children: dict[ControlNode, set[ControlNode]] = defaultdict(set)
         for node in nodes:
             for dependency in node.parent:
-                if dependency not in self.node_map:
+                if dependency not in self._node_map:
                     raise ValueError(f"Unknown dependency: {dependency!r} for node {node.id!r}")
-                self.children[dependency].add(node.id)
+                self._children[dependency].add(node.id)
 
         # Topological order (and cycle detection)
-        self.order: list[ControlNode] = self._toposort(self.parents)
-        if len(self.order) != len(nodes):
+        self._order: list[ControlNode] = self._toposort(self._parents)
+        if len(self._order) != len(nodes):
             raise ValueError("Dependency cycle detected")
 
         # Runtime state
         self.shutdown_event: asyncio.Event = asyncio.Event()
         self.ready_event_map: dict[ControlNode, asyncio.Event] = {
-            node_id: asyncio.Event() for node_id in self.node_map
+            node_id: asyncio.Event() for node_id in self._node_map
         }
 
-        self.handle_map: dict[ControlNode, NodeHandle] = {}
+        self._handle_map: dict[ControlNode, NodeHandle] = {}
         self._tasks: set[asyncio.Task[object]] = set()
 
     def health(self) -> dict[str, object]:
         """Health snapshot for HTTP /health."""
         nodes_snapshot: dict[ControlNode, object] = {}
-        for node_id, node in self.node_map.items():
-            handle = self.handle_map.get(node_id)
+        for node_id, node in self._node_map.items():
+            handle = self._handle_map.get(node_id)
             running = handle.is_alive if handle else False
             nodes_snapshot[node_id] = {
                 "name": node.runnable.name,
@@ -76,10 +76,10 @@ class Runner:
                 "ready": self.ready_event_map[node_id].is_set(),
                 "pid": handle.pid if handle else None,
                 "uptime_sec": handle.uptime_seconds if handle else 0.0,
-                "parent": sorted(self.parents[node_id]),
+                "parent": sorted(self._parents[node_id]),
             }
         return {
-            "run_id": self.run_id,
+            "run_id": self._run_id,
             "nodes": nodes_snapshot,
             "shutdown": self.shutdown_event.is_set(),
         }
@@ -110,7 +110,7 @@ class Runner:
         install_signal_handlers(loop, self._on_signal)
 
         # Spawn a supervisor loop per node
-        for node_id in self.order:
+        for node_id in self._order:
             task = asyncio.create_task(self._supervise_node(node_id), name=f"supervise:{node_id}")
             self._track_task(task)
 
@@ -118,14 +118,14 @@ class Runner:
             "runner.started",
             platform=platform.platform(),
             python=sys.version.split()[0],
-            node_count=len(self.node_map),
+            node_count=len(self._node_map),
         )
 
         # 2) Главный цикл: гонка между shutdown и приёмом control-сообщения.
         try:
             while not self.shutdown_event.is_set():
                 receive_task: asyncio.Task[Any] = asyncio.create_task(
-                    self.control_bus.receive(), name="control.receive"
+                    self._control_bus.receive(), name="control.receive"
                 )
                 stop_task: asyncio.Task[Any] = asyncio.create_task(
                     self.shutdown_event.wait(), name="runner.shutdown_wait"
@@ -163,7 +163,7 @@ class Runner:
                         )
                         continue
 
-                    node = self.node_map.get(node_id)
+                    node = self._node_map.get(node_id)
                     if node is None:
                         self.log_event.warning(
                             "control.unknown_node",
@@ -219,7 +219,7 @@ class Runner:
         self._kick_event.set()
 
     async def _supervise_node(self, node_id: ControlNode) -> None:
-        node = self.node_map[node_id]
+        node = self._node_map[node_id]
         backoff_state = node.runnable.backoff_state
         ready_event = self.ready_event_map[node_id]
 
@@ -239,7 +239,7 @@ class Runner:
                 await self.shutdown()
                 break
 
-            self.handle_map[node_id] = handle
+            self._handle_map[node_id] = handle
 
             # 3) Mark ready (immediately or via probe)
             await node.runnable.mark_ready(ready_event, node_log_event)
@@ -265,7 +265,7 @@ class Runner:
 
             # 5) On exit: clear ready; stop all dependents
             ready_event.clear()
-            for child_id in self.children.get(node_id, ()):
+            for child_id in self._children.get(node_id, ()):
                 await self._stop_node(child_id, reason=f"{node_id}_down")
 
             node_log_event.info(
@@ -285,7 +285,7 @@ class Runner:
                 health_task = None
 
             await node.runnable.stop(handle, "exit", node_log_event)
-            self.handle_map.pop(node_id, None)
+            self._handle_map.pop(node_id, None)
 
             # 7) Backoff bookkeeping and retry
             backoff_state.reset_if_uptime_good(uptime)
@@ -372,13 +372,13 @@ class Runner:
         return order
 
     async def _wait_parents_ready(self, node_id: ControlNode) -> None:
-        parents = self.parents.get(node_id, set())
+        parents = self._parents.get(node_id, set())
         if not parents:
             return
 
         # Wait until all parents are ready (or shutdown).
         while not self.shutdown_event.is_set():
-            if self.node_map[node_id].disabled:
+            if self._node_map[node_id].disabled:
                 return  # включат — цикл начнет заново
 
             if all(self.ready_event_map[parent].is_set() for parent in parents):
@@ -393,10 +393,10 @@ class Runner:
             self._kick_event.clear()
 
     async def _stop_node(self, node_id: ControlNode, *, reason: str) -> None:
-        node = self.node_map.get(node_id)
+        node = self._node_map.get(node_id)
         if node is None:
             return
-        handle = self.handle_map.get(node_id)
+        handle = self._handle_map.get(node_id)
         if handle is None:
             return
 
@@ -405,7 +405,7 @@ class Runner:
 
     async def _graceful_stop_all(self) -> None:
         # Stop in reverse topological order.
-        for node_id in reversed(self.order):
+        for node_id in reversed(self._order):
             await self._stop_node(node_id, reason="shutdown")
 
     async def _cancel_all_tasks(self) -> None:
@@ -428,11 +428,11 @@ class Runner:
         Periodically calls runnable.check(). If it fails `fail_threshold` times in a row,
         stops the node with reason='healthcheck_failed' (triggering normal restart/backoff).
         """
-        node = self.node_map[node_id]
+        node = self._node_map[node_id]
         fails = 0
         while not self.shutdown_event.is_set():
             await asyncio.sleep(interval_s)
-            handle = self.handle_map.get(node_id)
+            handle = self._handle_map.get(node_id)
 
             if handle is None or not handle.is_alive:
                 return
@@ -452,7 +452,7 @@ class Runner:
             fails += 1
             log_event.warning("health.fail", consecutive_fails=fails, threshold=fail_threshold)
             if fails >= fail_threshold:
-                handle = self.handle_map.get(node_id)
+                handle = self._handle_map.get(node_id)
                 if handle is not None:
                     try:
                         await node.runnable.stop(

@@ -3,7 +3,7 @@ from __future__ import annotations
 from asyncio import Queue
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Literal, TypeAlias
+from typing import Any, Literal, TypeAlias
 from uuid import UUID, uuid4
 
 
@@ -16,6 +16,7 @@ class ControlNode(StrEnum):
     NOW_PLAYING = "NOW_PLAYING"
     SEARCH = "SEARCH"
     API = "API"
+    DB = "DB"
 
 
 class ControlAction(StrEnum):
@@ -25,11 +26,23 @@ class ControlAction(StrEnum):
     STOP_ALL = "STOP_ALL"
     STOP_NODE = "STOP_NODE"
 
+    # Common
+    START = "START"
+    STATUS = "STATUS"
+    STOP = "STOP"
+
     # LiquidSoap
     SKIP = "SKIP"
     PUSH = "PUSH"
     POP = "POP"
     QUEUE = "QUEUE"
+
+    # Search
+    REINDEX = "REINDEX"
+    CLEAR_LRU = "CLEAR_LRU"
+
+    # DB
+    INSERT_TRACKS = "INSERT_TRACKS"
 
 
 @dataclass(slots=True, frozen=True)
@@ -41,7 +54,7 @@ class ControlMessage:
     # имя узла процесса
     node: ControlNode | None = None
     # данные для выполнения действия
-    payload: str | None = None
+    payload: Any | None = None
     # ид сообщения
     correlation_id: UUID = field(default_factory=uuid4)
 

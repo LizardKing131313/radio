@@ -153,7 +153,7 @@ class ProcessRunnable(Runnable, ABC):
         self, ready_event: asyncio.Event, log_event: FilteringBoundLogger
     ) -> ControlResult:
         ready_message = "process ready"
-        ready_action = self.get_ready_action()
+        ready_action = self._get_ready_action()
         if ready_action is None:
             ready_event.set()
             log_event.info(ready_message)

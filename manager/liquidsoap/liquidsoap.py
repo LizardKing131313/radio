@@ -28,28 +28,28 @@ class LiquidSoap(ProcessRunnable):
     def __init__(self, node_id: ControlNode, config: AppConfig | None = None) -> None:
         super().__init__(node_id=node_id)
         self.node_id = node_id
-        self.config = config or get_settings()
-        self.telnet = Telnet()
+        self._config = config or get_settings()
+        self._telnet = Telnet()
 
     @cached_property
     def command(self) -> ProcessCommand:
         return ProcessCommand(
             exe="/usr/bin/liquidsoap",
-            args=["-v", str(self.config.paths.data / "radio.liq")],
-            cwd=str(self.config.paths.base),
-            env={"LS_TELNET_PORT": str(self.config.liquidsoap.telnet_port)},
+            args=["-v", str(self._config.paths.data / "radio.liq")],
+            cwd=str(self._config.paths.base),
+            env={"LS_TELNET_PORT": str(self._config.liquidsoap.telnet_port)},
         )
 
     @cached_property
     def backoff_policy(self) -> BackoffPolicy:
-        return BackoffPolicy(max_sec=self.config.liquidsoap.restart_timer_max_sec)
+        return BackoffPolicy(max_sec=self._config.liquidsoap.restart_timer_max_sec)
 
-    def get_ready_action(self) -> Action | None:
+    def _get_ready_action(self) -> Action | None:
         async def _run() -> ControlResult:
             loop = asyncio.get_running_loop()
             deadline = loop.time() + float(self.ready_timeout_sec)
             while loop.time() < deadline:
-                res = await self.telnet.connect_only()
+                res = await self._telnet.connect_only()
                 if res.is_ok:
                     return Success("liquidsoap ready")
                 await asyncio.sleep(0.1)
@@ -61,7 +61,7 @@ class LiquidSoap(ProcessRunnable):
         self, ready_event: asyncio.Event, log_event: FilteringBoundLogger
     ) -> ControlResult:
         # быстрый health: достаточно TCP-коннекта
-        res = await self.telnet.connect_only()
+        res = await self._telnet.connect_only()
         return Success("ok") if res.is_ok else res
 
     async def receive(
@@ -69,12 +69,12 @@ class LiquidSoap(ProcessRunnable):
     ) -> ControlResult:
         match message.action:
             case ControlAction.SKIP:
-                return await self.telnet.hot_skip()
+                return await self._telnet.hot_skip()
             case ControlAction.PUSH:
-                return await self.telnet.hot_uri(message.payload)
+                return await self._telnet.hot_uri(str(message.payload))
             case ControlAction.POP:
-                return await self.telnet.hot_next()
+                return await self._telnet.hot_next()
             case ControlAction.QUEUE:
-                return await self.telnet.rq_queue()
+                return await self._telnet.rq_queue()
             case _:
                 return Error("unknown action")

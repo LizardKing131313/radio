@@ -19,6 +19,7 @@ class Paths(BaseModel):
     base: Path = Path("/opt/radio")
     data: Path = base / "data"
     data_base: Path = data / "radio.sqlite"
+    cookies: Path = data / "cookies.txt"
     cache_cold: Path = base / "cache" / "cold"
     cache_hot: Path = base / "cache" / "hot"
     runtime_fifo_dir: Path = base / "runtime" / "fifo"
@@ -49,6 +50,17 @@ class HLSSettings(BaseModel):
     hls_list_size: int = 12
     hls_delete_threshold: int = 14
     bitrates: list[int] = Field(default_factory=lambda: [64, 96, 128])
+
+
+class SearchSettings(BaseModel):
+
+    title: str = "говновоз"
+    # Behavior tuning (reasonable defaults for full crawl, then incremental):
+    interval_sec: int = 30  # pause between ticks
+    lru_capacity: int = 50_000  # remember last N ids within process lifetime
+    window_size: int = 200  # results per search "window" (yt-dlp playlist window)
+    max_windows_per_tick: int = 10  # windows per tick during full crawl
+    early_stop_new: int = 20  # in incremental: stop tick after K new items
 
 
 class Secrets(BaseModel):
@@ -112,6 +124,7 @@ class AppConfig(BaseSettings):
     paths: Paths = Field(default_factory=Paths)
     liquidsoap: LiquidSoapSettings = Field(default_factory=LiquidSoapSettings)
     hls: HLSSettings = Field(default_factory=HLSSettings)
+    search: SearchSettings = Field(default_factory=SearchSettings)
     secrets: Secrets = Field(default_factory=Secrets)
 
     # Convenience proxies
@@ -187,4 +200,13 @@ def get_settings() -> AppConfig:
     return AppConfig()
 
 
-__all__ = ["AppConfig", "HLSSettings", "MissingConfigError", "Paths", "Secrets", "get_settings"]
+__all__ = [
+    "AppConfig",
+    "HLSSettings",
+    "LiquidSoapSettings",
+    "MissingConfigError",
+    "Paths",
+    "SearchSettings",
+    "Secrets",
+    "get_settings",
+]

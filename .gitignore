@@ -16,6 +16,9 @@ __pycache__/
 logs/
 *.log
 
+*.*-shm
+*.*-wal
+
 .env
 *.env
 
