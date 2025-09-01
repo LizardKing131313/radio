@@ -7,6 +7,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from manager.config import AppConfig, get_settings
+from manager.logger import get_logger
+
 
 # --- Simple SQL migrations (embedded) -----------------------------------------
 # Версионирование максимально простое: числовые версии, один файл на версию.
@@ -263,27 +266,32 @@ MIGRATIONS: list[tuple[int, str]] = [
 ]
 
 
-@dataclass(frozen=True)
+@dataclass
 class DatabaseConfig:
-    path: Path
     pragmas: Sequence[str] = (
         "PRAGMA journal_mode=WAL",
         "PRAGMA synchronous=NORMAL",
         "PRAGMA temp_store=MEMORY",
         "PRAGMA foreign_keys=ON",
+        "PRAGMA busy_timeout=5000",
     )
 
 
 class Database:
     """Thin SQLite wrapper with simple SQL migrations."""
 
-    def __init__(self, config: DatabaseConfig) -> None:
-        self._config = config
+    def __init__(self, app_config: AppConfig | None = None, path: Path | str | None = None) -> None:
+        cfg = app_config or get_settings()
+        self._path = Path(path) if path else cfg.paths.data_base
+        self._database_config = DatabaseConfig()
         self._conn: sqlite3.Connection | None = None
+        self.logger = get_logger("data_base")
+        self.logger.info("Database initialized", path=self._path)
 
     def connect(self) -> sqlite3.Connection:
         if self._conn is None:
-            self._conn = sqlite3.connect(self._config.path, check_same_thread=False)
+            # ВАЖНО: autocommit
+            self._conn = sqlite3.connect(self._path, check_same_thread=False, isolation_level=None)
             self._conn.row_factory = sqlite3.Row
             self._apply_pragmas(self._conn)
         return self._conn
@@ -323,7 +331,7 @@ class Database:
 
     def _apply_pragmas(self, conn: sqlite3.Connection) -> None:
         cur = conn.cursor()
-        for p in self._config.pragmas:
+        for p in self._database_config.pragmas:
             cur.execute(p)
         cur.close()
 
@@ -363,8 +371,7 @@ def _cli() -> None:
     sub.add_parser("migrate", help="Apply embedded SQL migrations.")
     args = parser.parse_args()
 
-    config = DatabaseConfig(path=args.db_path)
-    db = Database(config)
+    db = Database(path=args.db_path)
     if args.cmd == "migrate":
         db.ensure_schema()
         # Keep CLI quiet.

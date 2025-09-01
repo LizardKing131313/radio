@@ -9,17 +9,15 @@ from manager.track_queue.models import TrackDict
 
 
 def build_ydl(cookies_path: str, start: int | None = None, end: int | None = None) -> YoutubeDL:
-    """Create yt-dlp instance for metadata-only search with optional playlist window."""
     opts: dict[str, Any] = {
         "quiet": True,
         "no_warnings": True,
-        "noplaylist": False,  # we filter playlists ourselves
+        "noplaylist": False,
         "extract_flat": "in_playlist",
         "skip_download": True,
         "socket_timeout": 10,
         "default_search": "ytsearch",
-        "cookies": cookies_path,  # REQUIRED cookies.txt
-        # Be nice to the network to avoid 429 on large crawls:
+        "cookiefile": cookies_path,
         "sleep_interval_requests": 0.2,
         "max_sleep_interval_requests": 0.6,
     }
@@ -30,12 +28,7 @@ def build_ydl(cookies_path: str, start: int | None = None, end: int | None = Non
     return YoutubeDL(opts)
 
 
-def search_title_window(
-    title: str,
-    cookies_path: str,
-    start: int,
-    end: int,
-) -> list[TrackDict]:
+def search_title_window(title: str, cookies_path: str, start: int, end: int) -> list[TrackDict]:
     """Blocking call executed in a thread: yt_dlp extract window [start .. end] + filtering."""
     if not title.strip():
         return []
@@ -62,9 +55,6 @@ def search_title_window(
         if dur < 60 or dur > 600:
             continue
 
-        if not is_music(e):
-            continue
-
         td = to_track_dict(e)
         if td:
             out.append(td)
@@ -88,13 +78,6 @@ def is_live(entry: dict[str, Any]) -> bool:
 def duration_sec(entry: dict[str, Any]) -> int:
     d = entry.get("duration")
     return int(d) if isinstance(d, int | float) else 0
-
-
-def is_music(entry: dict[str, Any]) -> bool:
-    cats = entry.get("categories") or []
-    if isinstance(cats, list) and any(isinstance(c, str) and "music" in c.lower() for c in cats):
-        return True
-    return bool(entry.get("track") or entry.get("artist"))
 
 
 def thumb_url(entry: dict[str, Any]) -> str | None:

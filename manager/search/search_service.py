@@ -116,7 +116,10 @@ class SearchService(ServiceRunnable):
 
                     self._wakeup.clear()
                     with contextlib.suppress(asyncio.TimeoutError):
-                        await asyncio.wait_for(self._wakeup.wait(), timeout=0)
+                        await asyncio.wait_for(
+                            self._wakeup.wait(),
+                            timeout=max(1, self._config.search.interval_sec),
+                        )
             except Exception as e:
                 log_out.error("Service loop failed", error=str(e))
             finally:
@@ -201,6 +204,11 @@ class SearchService(ServiceRunnable):
                 return Error("Unknown action")
 
     async def _do_search_once(self, log_out: FilteringBoundLogger) -> None:
+        if not self._config.search.title.strip():
+            log_out.warning("empty search title; nothing to search")
+            self._last_error = "empty title"
+            return
+
         # Backoff gate (after 429)
         if self._backoff_until and datetime.now(UTC) < self._backoff_until:
             log_out.warning(
@@ -248,13 +256,23 @@ class SearchService(ServiceRunnable):
 
                     total_new = len(publish_buffer)
 
+                    # диагностический лог, если вообще пусто
+                    if len(batch) == 0:
+                        log_out.warning(
+                            "empty search window",
+                            title=self._config.search.title,
+                            start=start,
+                            end=end,
+                            cookies=str(self._config.paths.cookies),
+                        )
+
                     self._cursor_start += self._config.search.window_size
                     windows += 1
-                    if len(batch) < self._config.search.window_size:
+                    # switch only when window is completely empty
+                    if len(batch) == 0:
                         self._mode = "incremental"
                         self._cursor_start = 1
                         break
-
             else:
                 start, end = 1, self._config.search.window_size
                 batch = await asyncio.get_running_loop().run_in_executor(
@@ -278,9 +296,10 @@ class SearchService(ServiceRunnable):
 
                 total_new = len(publish_buffer)
 
+            log_out.warning("pre publish", publish_buffer_size=len(publish_buffer))
             # Publish once per tick in batches (100..500 suggested)
             if publish_buffer:
-                await self._publish_in_batches(publish_buffer, suggested_batch=500)
+                await self._publish_in_batches(publish_buffer, suggested_batch=500, log=log_out)
 
             # Success → reset backoff
             self._backoff_attempts = 0
@@ -329,7 +348,7 @@ class SearchService(ServiceRunnable):
     # --------------------- Publish hooks ---------------------
 
     async def _publish_in_batches(
-        self, tracks: list[TrackDict], *, suggested_batch: int = 500
+        self, tracks: list[TrackDict], *, suggested_batch: int = 500, log: FilteringBoundLogger
     ) -> None:
         """
         Split and forward tracks by chunks. Override `_publish_discovered_batch` in a subclass
@@ -340,6 +359,7 @@ class SearchService(ServiceRunnable):
         size = max(1, min(suggested_batch, 1000))  # hard cap
         for i in range(0, len(tracks), size):
             chunk = tracks[i : i + size]
+            log.debug("publish", chunk_index=i)
             await self._control_bus.send(
                 ControlMessage(ControlAction.INSERT_TRACKS, ControlNode.DB, chunk)
             )

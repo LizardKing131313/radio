@@ -49,7 +49,7 @@ def configure_logging(run_id: str | None = None) -> str:
     time_stamper = structlog.processors.TimeStamper(fmt="iso", utc=True)
 
     formatter = ProcessorFormatter(
-        processor=JSONRenderer(),
+        processor=JSONRenderer(ensure_ascii=False),
         foreign_pre_chain=[
             merge_contextvars,
             structlog.stdlib.add_logger_name,
@@ -131,7 +131,7 @@ def _parse_log_level(value: str | None) -> int:
         "DEBUG": logging.DEBUG,
         "NOTSET": logging.NOTSET,
     }
-    return mapping.get(normalized, logging.INFO)
+    return mapping.get(normalized, logging.DEBUG)
 
 
 def _generate_run_id() -> str:

@@ -37,6 +37,12 @@ class TracksRepo:
         """
         conn = self.db.connect()
         try:
+            self.db.logger.debug(
+                "upsert SQL insert/update",
+                youtube_id=youtube_id,
+                title=title,
+                duration_sec=duration_sec,
+            )
             # noinspection SqlResolve
             cur = conn.execute(
                 """
@@ -66,9 +72,11 @@ class TracksRepo:
                 ),
             )
             row = cur.fetchone()
-            return int(row[0]) if row is not None else self.get_id_by_youtube_id(youtube_id)
-        except sqlite3.OperationalError:
-            pass
+            track_id = int(row[0]) if row is not None else self.get_id_by_youtube_id(youtube_id)
+            self.db.logger.debug("upsert success", youtube_id=youtube_id, track_id=track_id)
+            return track_id
+        except sqlite3.OperationalError as e:
+            self.db.logger.error("upsert OperationalError", youtube_id=youtube_id, error=repr(e))
 
         with contextlib.suppress(sqlite3.IntegrityError):
             conn.execute(

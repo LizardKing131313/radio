@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
 
 from structlog.typing import FilteringBoundLogger
 
@@ -16,26 +15,11 @@ from manager.runner.control import (
 )
 from manager.runner.node import Action
 from manager.runner.service_runnable import ServiceRun, ServiceRunnable
-from manager.track_queue.db import Database, DatabaseConfig
+from manager.track_queue.db import Database
 from manager.track_queue.repo import TracksRepo
 
 
 class RepoService(ServiceRunnable):
-    """
-    Minimal ingest service:
-    - run: set ready flag and wait for stop
-    - check: Success("OK")
-    - receive: accept 'tracks.batch' with payload of TrackDict list, upsert into DB
-    """
-
-    ready_timeout_sec: float
-    stop_timeout_sec: float
-    pragmas: Sequence[str] = (
-        "PRAGMA journal_mode=WAL",
-        "PRAGMA synchronous=NORMAL",
-        "PRAGMA temp_store=MEMORY",
-        "PRAGMA foreign_keys=ON",
-    )
 
     def __init__(self, node_id: ControlNode, config: AppConfig | None = None) -> None:
         super().__init__(node_id=node_id)
@@ -48,9 +32,7 @@ class RepoService(ServiceRunnable):
 
     def _ensure_repos(self) -> None:
         if self._db is None:
-            self._db = Database(
-                DatabaseConfig(path=self._config.paths.data_base, pragmas=self.pragmas)
-            )
+            self._db = Database()
             self._db.ensure_schema()
         if self._tracks is None:
             self._tracks = TracksRepo(self._db)
@@ -97,6 +79,7 @@ class RepoService(ServiceRunnable):
           youtube_id: str, title: str, duration_sec: int, url: str
         Optional: channel, thumbnail_url, audio_path, loudness_lufs, is_active
         """
+        log_event.debug("received payload in db", message=message)
         if not ready_event.is_set():
             return Error("service not ready")
 
@@ -114,9 +97,16 @@ class RepoService(ServiceRunnable):
             self._ensure_repos()
             assert self._tracks is not None
 
+            log_event.debug("receive payload", name=self.name, size=len(payload))
+
             upserted: int = 0
             for track in payload:
-                self._tracks.upsert(
+                log_event.debug(
+                    "upsert start",
+                    youtube_id=track.get("youtube_id"),
+                    title=track.get("title"),
+                )
+                track_id = self._tracks.upsert(
                     youtube_id=track["youtube_id"],
                     title=track["title"],
                     duration_sec=int(track["duration_sec"]),
@@ -124,6 +114,11 @@ class RepoService(ServiceRunnable):
                     channel=track.get("channel"),
                     thumbnail_url=track.get("thumbnail_url"),
                     is_active=int(track.get("is_active", 1)),
+                )
+                log_event.debug(
+                    "upsert done",
+                    youtube_id=track.get("youtube_id"),
+                    db_id=track_id,
                 )
                 upserted += 1
 

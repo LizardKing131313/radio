@@ -15,52 +15,50 @@ class MissingConfigError(RuntimeError):
 
 
 class Paths(BaseModel):
-
-    base: Path = Path("/opt/radio")
-    data: Path = base / "data"
-    data_base: Path = data / "radio.sqlite"
-    cookies: Path = data / "cookies.txt"
-    cache_cold: Path = base / "cache" / "cold"
-    cache_hot: Path = base / "cache" / "hot"
-    runtime_fifo_dir: Path = base / "runtime" / "fifo"
-    runtime_info_dir: Path = base / "runtime" / "info"
-    fifo_audio_path: Path = runtime_fifo_dir / "radio.wav"
-    nowplaying_path: Path = runtime_info_dir / "nowplaying.txt"
-    www_hls_ts: Path = base / "www" / "hls" / "ts"
-    www_hls_mp4: Path = base / "www" / "hls" / "mp4"
-    www_html: Path = base / "www" / "html"
+    base: Path = Field(default=Path("/opt/radio"))
+    data: Path = Field(default=Path("/opt/radio/data"))
+    data_base: Path = Field(default=Path("/opt/radio/data/radio.sqlite"))
+    cookies: Path = Field(default=Path("/opt/radio/data/cookies.txt"))
+    cache_cold: Path = Field(default=Path("/opt/radio/cache/cold"))
+    cache_hot: Path = Field(default=Path("/opt/radio/cache/hot"))
+    runtime_fifo_dir: Path = Field(default=Path("/opt/radio/runtime/fifo"))
+    runtime_info_dir: Path = Field(default=Path("/opt/radio/runtime/info"))
+    fifo_audio_path: Path = Field(default=Path("/opt/radio/runtime/fifo/radio.wav"))
+    nowplaying_path: Path = Field(default=Path("/opt/radio/runtime/info/nowplaying.txt"))
+    www_hls_ts: Path = Field(default=Path("/opt/radio/www/hls/ts"))
+    www_hls_mp4: Path = Field(default=Path("/opt/radio/www/hls/mp4"))
+    www_html: Path = Field(default=Path("/opt/radio/www/html"))
 
 
 class LiquidSoapSettings(BaseModel):
 
-    telnet_host: str = "127.0.0.1"
-    telnet_port: int = 1234
-    restart_timer_max_sec: int = 5
-    connect_timeout_sec: float = 5.0
-    command_timeout_sec: float = 5.0
-    per_line_timeout_sec: float = 0.2
-    max_lines: int = 1000
-    max_total_bytes: int = 256 * 1024
+    telnet_host: str = Field(default="127.0.0.1")
+    telnet_port: int = Field(default=1234)
+    restart_timer_max_sec: int = Field(default=5)
+    connect_timeout_sec: float = Field(default=5.0)
+    command_timeout_sec: float = Field(default=5.0)
+    per_line_timeout_sec: float = Field(default=0.2)
+    max_lines: int = Field(default=1000)
+    max_total_bytes: int = Field(default=256 * 1024)
 
 
 class HLSSettings(BaseModel):
     """HLS knobs kept close to ffmpeg flags for easier mapping."""
 
-    hls_time: int = 6
-    hls_list_size: int = 12
-    hls_delete_threshold: int = 14
+    hls_time: int = Field(default=6)
+    hls_list_size: int = Field(default=12)
+    hls_delete_threshold: int = Field(default=14)
     bitrates: list[int] = Field(default_factory=lambda: [64, 96, 128])
 
 
 class SearchSettings(BaseModel):
 
-    title: str = "говновоз"
-    # Behavior tuning (reasonable defaults for full crawl, then incremental):
-    interval_sec: int = 30  # pause between ticks
-    lru_capacity: int = 50_000  # remember last N ids within process lifetime
-    window_size: int = 200  # results per search "window" (yt-dlp playlist window)
-    max_windows_per_tick: int = 10  # windows per tick during full crawl
-    early_stop_new: int = 20  # in incremental: stop tick after K new items
+    title: str = Field(default="говновоз")
+    interval_sec: int = Field(default=5)  # pause between ticks
+    lru_capacity: int = Field(default=50_000)  # remember last N ids
+    window_size: int = Field(default=200)  # results per search "window"
+    max_windows_per_tick: int = Field(default=15)  # during full crawl
+    early_stop_new: int = Field(default=20)  # stop tick after K new items (incremental)
 
 
 class Secrets(BaseModel):
@@ -69,10 +67,10 @@ class Secrets(BaseModel):
     Filled from env explicitly in AppConfig.from_yaml().
     """
 
-    youtube_api_key_raw: SecretStr | None = None
-    youtube_stream_key_raw: SecretStr | None = None
-    rtmp_enabled: bool = False
-    rtmp_ingest_url: str = "rtmp://a.rtmp.youtube.com/live2"
+    youtube_api_key_raw: SecretStr | None = Field(default=None)
+    youtube_stream_key_raw: SecretStr | None = Field(default=None)
+    rtmp_enabled: bool = Field(default=False)
+    rtmp_ingest_url: str = Field(default="rtmp://a.rtmp.youtube.com/live2")
 
     @property
     def youtube_api_key(self) -> SecretStr:
@@ -126,15 +124,6 @@ class AppConfig(BaseSettings):
     hls: HLSSettings = Field(default_factory=HLSSettings)
     search: SearchSettings = Field(default_factory=SearchSettings)
     secrets: Secrets = Field(default_factory=Secrets)
-
-    # Convenience proxies
-    @property
-    def fifo_audio_path(self) -> Path:
-        return self.paths.fifo_audio_path
-
-    @property
-    def nowplaying_path(self) -> Path:
-        return self.paths.nowplaying_path
 
     # ---------- YAML loader with explicit env merge ----------
     @classmethod
@@ -197,7 +186,8 @@ class AppConfig(BaseSettings):
 
 @cache
 def get_settings() -> AppConfig:
-    return AppConfig()
+    # Read from YAML by default; callers can still pass a path to from_yaml() directly if needed.
+    return AppConfig.from_yaml()
 
 
 __all__ = [

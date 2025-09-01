@@ -148,6 +148,9 @@ class Runner:
                 # Обработка control-сообщения
                 if receive_task in done:
                     message = receive_task.result()
+                    self.log_event.debug(
+                        "received message", action=message.action, node=message.node
+                    )
                     if message is None:
                         # Например: bus закрылся. Выходим в shutdown.
                         self.log_event.warning("control.receive_none")
