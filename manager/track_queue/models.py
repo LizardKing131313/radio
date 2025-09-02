@@ -23,6 +23,11 @@ class TrackDict(TypedDict, total=False):
     play_count: int
     is_active: int
     deleted_at: str | None
+    # prefetch/cache telemetry (v5)
+    cache_state: str | None  # 'none' | 'cold' | 'hot'
+    cache_hot_until: str | None
+    last_prefetch_at: str | None
+    fail_count: int | None
 
 
 class QueueItemDict(TypedDict, total=False):
@@ -68,6 +73,11 @@ class Track:
     play_count: int = 0
     is_active: int = 1
     deleted_at: str | None = None
+    # prefetch/cache telemetry (v5)
+    cache_state: str | None = None
+    cache_hot_until: str | None = None
+    last_prefetch_at: str | None = None
+    fail_count: int | None = None
 
     @staticmethod
     def from_row(row: Mapping[str, Any]) -> Track:
@@ -94,6 +104,27 @@ class Track:
                 if "deleted_at" in row and row["deleted_at"] is not None
                 else None
             ),
+            # v5 fields (optional presence-safe)
+            cache_state=(
+                str(row["cache_state"])
+                if "cache_state" in row and row["cache_state"] is not None
+                else None
+            ),
+            cache_hot_until=(
+                str(row["cache_hot_until"])
+                if "cache_hot_until" in row and row["cache_hot_until"] is not None
+                else None
+            ),
+            last_prefetch_at=(
+                str(row["last_prefetch_at"])
+                if "last_prefetch_at" in row and row["last_prefetch_at"] is not None
+                else None
+            ),
+            fail_count=(
+                int(row["fail_count"])
+                if "fail_count" in row and row["fail_count"] is not None
+                else None
+            ),
         )
 
     def to_dict(self) -> TrackDict:
@@ -112,6 +143,11 @@ class Track:
             play_count=self.play_count,
             is_active=self.is_active,
             deleted_at=self.deleted_at,
+            # v5
+            cache_state=self.cache_state,
+            cache_hot_until=self.cache_hot_until,
+            last_prefetch_at=self.last_prefetch_at,
+            fail_count=self.fail_count,
         )
 
 

@@ -138,6 +138,47 @@ class TracksRepo:
             (track_id,),
         )
 
+    def update_cache_state(
+        self,
+        track_id: int,
+        *,
+        cache_state: str | None = None,
+        cache_hot_until: str | None = None,
+        last_prefetch_at: str | None = None,
+        fail_count: int | None = None,
+    ) -> None:
+        """
+        Update cache-related fields for a track.
+        Any param left None will not overwrite existing.
+        """
+
+        # noinspection SqlResolve
+        self.db.connect().execute(
+            """
+            UPDATE tracks
+            SET
+                cache_state      = COALESCE(?, cache_state),
+                cache_hot_until  = COALESCE(?, cache_hot_until),
+                last_prefetch_at = COALESCE(?, last_prefetch_at),
+                fail_count       = COALESCE(?, fail_count)
+            WHERE id = ?
+            """,
+            (cache_state, cache_hot_until, last_prefetch_at, fail_count, track_id),
+        )
+
+    def increment_fail_count(self, track_id: int) -> None:
+        """Increment fail_count after a failed prefetch attempt."""
+        # noinspection SqlResolve
+        self.db.connect().execute(
+            """
+            UPDATE tracks
+            SET fail_count = fail_count + 1,
+                last_prefetch_at = (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            WHERE id = ?
+            """,
+            (track_id,),
+        )
+
 
 # --- Queue (sort_key-based ordering) -----------------------------------------
 
