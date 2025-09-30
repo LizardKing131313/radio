@@ -42,7 +42,7 @@ pipx upgrade yt-dlp
     pipx uninstall yt-dlp
 ```
 
-# 3. Liquidsoap
+## 3. Liquidsoap
 
 Установка
 

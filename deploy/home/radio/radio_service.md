@@ -96,7 +96,8 @@
 ```bash
     sudo find /var/www/hls/ts  -type f -delete
     sudo find /var/www/hls/mp4 -type f -delete
-    sudo find /var/www/hls     -maxdepth 1 -type f \( -name '*.m3u8' -o -name '*.tmp' \) -delete
+    sudo find /var/www/hls     \
+    -maxdepth 1 -type f \( -name '*.m3u8' -o -name '*.tmp' \) -delete
 
     sudo find /var/cache/radio -type f -mtime +7 -delete
 ```
