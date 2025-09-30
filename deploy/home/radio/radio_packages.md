@@ -1,4 +1,6 @@
-# 1. ffmpeg
+# Packages
+
+## 1. ffmpeg
 
 Установка
 
@@ -14,7 +16,7 @@
     sudo apt remove --purge ffmpeg -y
 ```
 
-# 2. yt-dlp
+## 2. yt-dlp
 
 Установка
 

@@ -1,4 +1,6 @@
-# 1. Установка
+# NGINX
+
+## 1. Установка
 
 ```bash
     sudo apt update
@@ -8,7 +10,7 @@
     nginx -v
 ```
 
-# 2. Добавить конфигурацию в /etc/nginx/conf.d/radio.conf
+## 2. Добавить конфигурацию в /etc/nginx/conf.d/radio.conf
 
 Выполнить валидацию конфига
 
@@ -16,7 +18,7 @@
     sudo nginx -t
 ```
 
-# 3. Запуск
+## 3. Запуск
 
 ```bash
     sudo systemctl daemon-reload
@@ -50,7 +52,7 @@
     sudo systemctl reload nginx
 ```
 
-# 4. Остановка и удаление
+## 4. Остановка и удаление
 
 ```bash
     sudo systemctl stop nginx

@@ -1,4 +1,6 @@
-# 1. Получить куки YouTube ~/cookies.txt
+# Deploy
+
+## 1. Получить куки YouTube ~/cookies.txt
 
 - Установить в Chrome GetCookies.txt
 - Дать доступ расширению в режим инкогнито и прикрепить к адресной строке
@@ -7,9 +9,9 @@
 - Скачать куки через GetCookies.txt
 - Скинуть их в ~/cookies.txt
 
-# 2. Сформировать playlist.txt и скинуть его ~/playlist.txt
+## 2. Сформировать playlist.txt и скинуть его ~/playlist.txt
 
-# 3. Настроить папки и права доступа
+## 3. Настроить папки и права доступа
 
 ```bash
     sudo apt install -y acl
@@ -28,7 +30,9 @@
     sudo setfacl -R -m d:g:www-data:rwx /var/www/hls /var/www/hls/ts /var/www/hls/mp4
 ```
 
-# 4. Убедится, что настройки сервиса на месте /etc/systemd/system/radio.service
+## 4. Убедится, что настройки сервиса на месте
+
+/etc/systemd/system/radio.service
 
 Обновить демон
 
@@ -36,7 +40,7 @@
     sudo systemctl daemon-reexec
 ```
 
-# 5. Создать и запустить сервис
+## 5. Создать и запустить сервис
 
 ```bash
     sudo chown -R radio:radio "/home/radio"
@@ -87,7 +91,7 @@
     sudo journalctl -u radio.service
 ```
 
-# 6. Очистка файлов
+## 6. Очистка файлов
 
 ```bash
     sudo find /var/www/hls/ts  -type f -delete
@@ -97,7 +101,7 @@
     sudo find /var/cache/radio -type f -mtime +7 -delete
 ```
 
-# 6. Остановка и удаление
+## 7. Остановка и удаление
 
 ```bash
     sudo systemctl stop radio.service
