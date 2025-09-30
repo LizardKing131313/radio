@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import os
 import signal
+import sys
 import time
 from abc import ABC
 from collections.abc import Mapping
@@ -211,15 +212,7 @@ class ProcessRunnable(Runnable, ABC):
 
         # 1) TERM whole process group
         if process.returncode is None:
-            try:
-                if process.pid is not None:
-                    try:
-                        pgid = os.getpgid(process.pid)  # type: ignore
-                    except Exception:
-                        pgid = process.pid
-                    os.killpg(pgid, signal.SIGTERM)  # type: ignore
-            except Exception as exc:
-                log_event.warning("signal.term_error", error=repr(exc))
+            self._terminate_process(process, log_event, terminate=True)
 
         log_event.info("proc.terminate_sent", pid=process.pid, reason=reason)
 
@@ -229,15 +222,7 @@ class ProcessRunnable(Runnable, ABC):
             log_event.info("proc.terminated", pid=process.pid, returncode=process.returncode)
         except asyncio.TimeoutError:  # noqa: UP041
             # 3) KILL whole process group
-            try:
-                if process.pid is not None:
-                    try:
-                        pgid = os.getpgid(process.pid)  # type: ignore
-                    except Exception:
-                        pgid = process.pid
-                    os.killpg(pgid, signal.SIGKILL)  # type: ignore
-            except Exception as exc:
-                log_event.warning("signal.kill_error", error=repr(exc))
+            self._terminate_process(process, log_event, terminate=False)
 
             # 4) final wait after KILL
             try:
@@ -256,3 +241,22 @@ class ProcessRunnable(Runnable, ABC):
             for result in results:
                 if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
                     log_event.warning("drainer.error", error=repr(result))
+
+    @staticmethod
+    def _terminate_process(
+        process: asyncio.subprocess.Process, log_event: FilteringBoundLogger, terminate: bool
+    ) -> None:
+        if sys.platform != "win32":
+            try:
+                if process.pid is not None:
+                    try:
+                        pgid = os.getpgid(process.pid)
+                    except Exception:
+                        pgid = process.pid
+                    os.killpg(pgid, signal.SIGTERM if terminate else signal.SIGKILL)
+            except Exception as exception:
+                log_event.warning(
+                    f"signal.{'terminate' if terminate else 'kill'}_event", error=repr(exception)
+                )
+        else:
+            raise NotImplementedError(f"sys.platform == '{sys.platform}'")
