@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 from functools import cached_property
 from typing import ClassVar
 
@@ -14,7 +15,6 @@ from manager.runner.process_runnable import ProcessCommand, ProcessRunnable
 
 
 class HLS(ProcessRunnable):
-
     health_interval_sec: ClassVar[float] = 10.0
 
     def __init__(self, node_id: ControlNode, config: AppConfig | None = None) -> None:
@@ -105,14 +105,21 @@ class HLS(ProcessRunnable):
         # Safe, non-destructive probe:
         # open read end NONBLOCK just to ensure FIFO exists and is accessible.
         try:
-            fd = os.open(fifo_path, os.O_RDONLY | os.O_NONBLOCK)  # type: ignore[attr-defined]
-            os.close(fd)
+            file_descriptor = self._open(fifo_path)
+            os.close(file_descriptor)
             return Success("OK: FIFO accessible (non-blocking read).")
-        except OSError as e:
+        except OSError as exception:
             # Still do not fail the node here; just report.
-            return Success(f"NOTE: FIFO read-probe errno={e.errno} ({e.strerror})")
+            return Success(f"NOTE: FIFO read-probe errno={exception.errno} ({exception.strerror})")
 
     async def receive(
         self, ready_event: asyncio.Event, message: ControlMessage, log_event: FilteringBoundLogger
     ) -> ControlResult:
         pass
+
+    @staticmethod
+    def _open(fifo_path: str) -> int:
+        if sys.platform != "win32":
+            return os.open(fifo_path, os.O_RDONLY | os.O_NONBLOCK)
+        else:
+            raise NotImplementedError(f"sys.platform == '{sys.platform}'")
