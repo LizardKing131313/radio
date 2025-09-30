@@ -3,7 +3,9 @@ name: Qodana CI (Community)
 
 "on":
   push:
-    branches: [ master, main ]
+    branches:
+      - master,
+      - main
   pull_request:
 
 jobs:
