@@ -214,10 +214,10 @@ class ProcessRunnable(Runnable, ABC):
             try:
                 if process.pid is not None:
                     try:
-                        pgid = os.getpgid(process.pid)  # type: ignore[attr-defined]
+                        pgid = os.getpgid(process.pid)  # type: ignore
                     except Exception:
                         pgid = process.pid
-                    os.killpg(pgid, signal.SIGTERM)  # type: ignore[attr-defined]
+                    os.killpg(pgid, signal.SIGTERM)  # type: ignore
             except Exception as exc:
                 log_event.warning("signal.term_error", error=repr(exc))
 
@@ -232,10 +232,10 @@ class ProcessRunnable(Runnable, ABC):
             try:
                 if process.pid is not None:
                     try:
-                        pgid = os.getpgid(process.pid)  # type: ignore[attr-defined]
+                        pgid = os.getpgid(process.pid)  # type: ignore
                     except Exception:
                         pgid = process.pid
-                    os.killpg(pgid, signal.SIGKILL)  # type: ignore[attr-defined]
+                    os.killpg(pgid, signal.SIGKILL)  # type: ignore
             except Exception as exc:
                 log_event.warning("signal.kill_error", error=repr(exc))
 
