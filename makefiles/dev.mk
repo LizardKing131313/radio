@@ -40,7 +40,7 @@ coverage:
 
 .PHONY: coverage-badge
 coverage-badge:
-	$(PYTHON) scripts/gen_badge.py
+	$(PYTHON) scripts/badge/gen_badge.py
 
 .PHONY: ci
 ci: lint test

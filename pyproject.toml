@@ -10,27 +10,27 @@ requires-python = ">=3.11"
 dependencies = [
   "yt-dlp>=2025.8.20",
   "typer>=0.12",
-  "pydantic>=2.7",
-  "pydantic-settings>=2.3",
-  "pyyaml>=6.0",
+  "pydantic>=2.11.9",
+  "pydantic-settings>=2.11.0",
+  "pyyaml>=6.0.3",
   "jinja2>=3.1",
   "structlog>=25.4.0"
 ]
 [project.optional-dependencies]
 dev = [
-  "ruff>=0.12.11",
-  "black>=25.1.0",
-  "pytest>=8.0",
-  "pytest-asyncio>=0.23",
-  "pytest-cov>=4.1",
-  "mypy>=1.17.1",
+  "ruff>=0.13.2",
+  "black>=25.9.0",
+  "pytest>=8.4.2",
+  "pytest-asyncio>=1.2.0",
+  "pytest-cov>=7.0.0",
+  "mypy>=1.18.2",
   "pre-commit>=3.7",
-  "coverage[toml]>=7.6",
+  "coverage[toml]>=7.10.7",
   "anybadge>=1.16",
   "pip-audit>=2.7",
-  "types-PyYAML>=6.0.12.20250822",
+  "types-PyYAML>=6.0.12.20250915",
   "pytest-builtin-types",
-  "types-requests"
+  "types-requests>=2.32.4.20250913"
 ]
 
 [tool.setuptools.packages.find]
@@ -56,7 +56,7 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 per-file-ignores = { "__init__.py" = ["F401"] }
 
 [tool.ruff.lint.isort]
-known-first-party = ["scripts", "manager"]
+known-first-party = ["scripts", "manager", "tests"]
 combine-as-imports = true
 lines-after-imports = 2
 
@@ -74,7 +74,8 @@ warn_redundant_casts = true
 warn_unused_configs = true
 strict_optional = false
 disallow_untyped_defs = false
-exclude = "(tests/|^NUL$)"
+files = ["scripts", "tests", "manager"]
+exclude = "(?i)^(venv|\\.venv|build|dist|\\.git)(/|$)"
 cache_dir = ".mypy_cache"
 
 [[tool.mypy.overrides]]
@@ -104,7 +105,7 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-pythonpath = [".", "scripts", "manager"]
+pythonpath = ["scripts", "manager"]
 
 [tool.coverage.run]
 branch = true

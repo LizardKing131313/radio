@@ -21,6 +21,7 @@ class Paths(BaseModel):
     cookies: Path = Field(default=Path("/opt/radio/data/cookies.txt"))
     cache_cold: Path = Field(default=Path("/opt/radio/cache/cold"))
     cache_hot: Path = Field(default=Path("/opt/radio/cache/hot"))
+    cache_blacklist: Path = Field(default=Path("/opt/radio/cache/blacklist"))
     runtime_fifo_dir: Path = Field(default=Path("/opt/radio/runtime/fifo"))
     runtime_info_dir: Path = Field(default=Path("/opt/radio/runtime/info"))
     fifo_audio_path: Path = Field(default=Path("/opt/radio/runtime/fifo/radio.wav"))
@@ -31,7 +32,6 @@ class Paths(BaseModel):
 
 
 class LiquidSoapSettings(BaseModel):
-
     telnet_host: str = Field(default="127.0.0.1")
     telnet_port: int = Field(default=1234)
     restart_timer_max_sec: int = Field(default=5)
@@ -52,13 +52,22 @@ class HLSSettings(BaseModel):
 
 
 class SearchSettings(BaseModel):
-
     title: str = Field(default="говновоз")
     interval_sec: int = Field(default=5)  # pause between ticks
     lru_capacity: int = Field(default=50_000)  # remember last N ids
     window_size: int = Field(default=200)  # results per search "window"
     max_windows_per_tick: int = Field(default=15)  # during full crawl
     early_stop_new: int = Field(default=20)  # stop tick after K new items (incremental)
+
+
+class PrefetchSetting(BaseModel):
+    interval_sec: int = Field(default=5)
+    cold_quota_bytes: int = Field(default=5368709120)
+    hot_max_items: int = Field(default=5)
+    batch_size: int = Field(default=100)
+    download_timeout_sec: int = Field(default=600)
+    hot_ttl_minutes: int = Field(default=30)
+    concurrent_downloads: int = Field(default=4)
 
 
 class Secrets(BaseModel):
@@ -123,6 +132,7 @@ class AppConfig(BaseSettings):
     liquidsoap: LiquidSoapSettings = Field(default_factory=LiquidSoapSettings)
     hls: HLSSettings = Field(default_factory=HLSSettings)
     search: SearchSettings = Field(default_factory=SearchSettings)
+    prefetch: PrefetchSetting = Field(default_factory=PrefetchSetting)
     secrets: Secrets = Field(default_factory=Secrets)
 
     # ---------- YAML loader with explicit env merge ----------
@@ -196,6 +206,7 @@ __all__ = [
     "LiquidSoapSettings",
     "MissingConfigError",
     "Paths",
+    "PrefetchSetting",
     "SearchSettings",
     "Secrets",
     "get_settings",

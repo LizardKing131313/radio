@@ -21,7 +21,6 @@ ServiceRun = Callable[
 
 @dataclass(slots=True)
 class ServiceHandle(NodeHandle):
-
     # время запуска процесса
     started_monotonic: float
 
@@ -100,9 +99,7 @@ class ServiceRunnable(Runnable, ABC):
         proc_wait.set_name("wait:svc_exit")
         shut_wait = asyncio.create_task(shutdown_event.wait(), name="wait:shutdown")
 
-        done, pending = await asyncio.wait(
-            {proc_wait, shut_wait}, return_when=asyncio.FIRST_COMPLETED
-        )
+        _, pending = await asyncio.wait({proc_wait, shut_wait}, return_when=asyncio.FIRST_COMPLETED)
 
         # Cancel the branch that didn't finish and drain it cleanly
         for task in pending:

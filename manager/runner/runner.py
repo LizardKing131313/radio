@@ -19,7 +19,6 @@ from .signals import install_signal_handlers
 
 
 class Runner:
-
     def __init__(self, run_id: str, control_bus: ControlBus, nodes: list[Node]) -> None:
         if not nodes:
             raise ValueError("At least one Node is required")
@@ -390,7 +389,7 @@ class Runner:
             waits = {asyncio.create_task(self.ready_event_map[parent].wait()) for parent in parents}
             waits.add(asyncio.create_task(self._kick_event.wait()))
             waits.add(asyncio.create_task(self.shutdown_event.wait()))
-            done, pending = await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
+            _, pending = await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
             for task in pending:
                 task.cancel()
             self._kick_event.clear()

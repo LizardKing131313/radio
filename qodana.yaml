@@ -1,5 +1,5 @@
 version: 1.0
-linter: jetbrains/qodana-python:2024.3
+linter: qodana-python-community
 
 projectJDK: "Python 3.11"  # метаданные для отчёта
 

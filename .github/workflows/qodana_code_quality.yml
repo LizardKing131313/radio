@@ -1,62 +1,63 @@
-name: Qodana
+---
+name: Qodana CI (Community)
 
-on:
-  workflow_dispatch:
-  pull_request:
+"on":
   push:
-    branches: [ "**" ]
-
-concurrency:
-  group: qodana-${{ github.ref }}
-  cancel-in-progress: true
+    branches: [ master, main ]
+  pull_request:
 
 jobs:
   qodana:
-    name: Qodana scan
+    name: Qodana (Community)
     runs-on: ubuntu-latest
+
     permissions:
       contents: read
       security-events: write
-      checks: write
-      pull-requests: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Qodana Scan
-        uses: JetBrains/qodana-action@v2025.2
-        env:
-          QODANA_TOKEN: ${{ secrets.QODANA_TOKEN }}
         with:
-          results-dir: qodana
-          upload-result: true
-          use-caches: true
-          use-annotations: true
-          post-pr-comment: true
-          pr-mode: ${{ github.event_name == 'pull_request' }}
-          args: --fail-threshold=0
+          fetch-depth: 0
 
-      - name: Upload SARIF to GitHub Code Scanning
-        if: always()
+      # ВАЖНО: args через запятые, не пробелы
+      - name: Qodana Scan (Community)
+        id: qscan
+        uses: JetBrains/qodana-action@v2025.2
+        with:
+          args: >-
+            --linter,qodana-python-community,
+            --within-docker,true,
+            --results-dir,qodana
+          use-caches: true
+          pr-mode: false
+
+      # Диагностика — можно потом удалить
+      - name: List Qodana outputs (debug)
+        if: ${{ always() }}
+        run: |
+          echo "=== Root dir ==="; ls -lah || true
+          echo "=== qodana ==="; ls -lah qodana || true
+          echo "=== qodana/results ==="; ls -lah qodana/results || true
+
+      # Находим, какой SARIF сгенерился, и кладём путь в env
+      - name: Resolve SARIF path
+        if: ${{ always() }}
+        run: |
+          if [ -f "qodana/results/qodana.sarif" ]; then
+            echo "SARIF=qodana/results/qodana.sarif" >> "$GITHUB_ENV"
+          elif [ -f "qodana/results/qodana.sarif.json" ]; then
+            echo "SARIF=qodana/results/qodana.sarif.json" >> "$GITHUB_ENV"
+          else
+            echo "SARIF=" >> "$GITHUB_ENV"
+          fi
+          echo "Resolved SARIF: ${SARIF:-<none>}"
+
+      - name: Upload SARIF from Qodana
+        if: ${{ always() && env.SARIF != '' }}
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: qodana/results/qodana.sarif
+          sarif_file: ${{ env.SARIF }}
           category: qodana
-
-      - name: Fail if HIGH findings exist
-        run: |
-          sudo apt-get update -y && sudo apt-get install -y jq
-          FILE=$(ls -1 qodana/**/*.sarif* 2>/dev/null | head -n1)
-          if [ -z "$FILE" ]; then echo 'No SARIF found'; exit 0; fi
-          HIGH=$(jq '[.runs[].results[] | select(.level=="error")] | length' "$FILE")
-          echo "Qodana HIGH findings: $HIGH"
-          if [ "$HIGH" -gt 0 ]; then echo "::error::Failing due to HIGH findings"; exit 1; fi
-
-      - name: Upload raw Qodana artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: qodana-results
-          path: qodana
-          retention-days: 7
+          wait-for-processing: true

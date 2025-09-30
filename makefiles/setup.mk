@@ -46,8 +46,7 @@ setup: venv upgrade-pip pip-tools
 	fi
 	# pre-commit
 	$(PIP) install -U pre-commit
-	$(VENV_BIN)/pre-commit clean
-	$(VENV_BIN)/pre-commit install
+	$(MAKE) hooks
 
 .PHONY: hooks
 hooks:
