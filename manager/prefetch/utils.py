@@ -6,14 +6,14 @@ from collections.abc import Iterable
 from pathlib import Path
 
 
-def iter_files(dir_path: Path) -> Iterable[Path]:
+def iterate_files(dir_path: Path) -> Iterable[Path]:
     if not dir_path.exists():
         return []
-    return (p for p in dir_path.iterdir() if p.is_file())
+    return (path for path in dir_path.iterdir() if path.is_file())
 
 
-def watch_url(yid: str) -> str:
-    return f"https://www.youtube.com/watch?v={yid}"
+def watch_url(youtube_id: str) -> str:
+    return f"https://www.youtube.com/watch?v={youtube_id}"
 
 
 async def proc_exec(*args: str, timeout: int | None = None) -> tuple[int, str, str]:

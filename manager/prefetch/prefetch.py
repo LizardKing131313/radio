@@ -15,7 +15,7 @@ from manager.prefetch.data import BlacklistState, ColdReady, Metrics
 from manager.prefetch.utils import (
     SuppressTask,
     iso_after_minutes,
-    iter_files,
+    iterate_files,
     now_iso,
     proc_exec,
     watch_url,
@@ -63,20 +63,22 @@ class PrefetchService(ServiceRunnable):
     # noinspection PyTypeHints
     def _get_service_run(self) -> ServiceRun | None:
         async def run(
-            stop_ev: asyncio.Event, ready_ev_external: asyncio.Event, log: FilteringBoundLogger
+            stop_event: asyncio.Event,
+            ready_event_external: asyncio.Event,
+            log: FilteringBoundLogger,
         ) -> int | None:
             await self._ensure_dirs(log)
-            ready_ev_external.set()
+            ready_event_external.set()
             self._trigger.set()
 
-            while not stop_ev.is_set():
+            while not stop_event.is_set():
                 try:
                     await self._enforce_cold_quota(log)
                     tracks = await self._request_missing_tracks(
                         self._config.prefetch.batch_size, log
                     )
                     if tracks:
-                        await self._process_tracks_parallel(tracks, stop_ev, log)
+                        await self._process_tracks_parallel(tracks, stop_event, log)
                 except Exception as e:
                     log.error("prefetch loop error", name=self.name, err=str(e))
                 finally:
@@ -85,7 +87,7 @@ class PrefetchService(ServiceRunnable):
                         self._config.paths.cache_hot,
                         self._config.prefetch.cold_quota_bytes,
                     )
-                    await self._wait_interval_or_trigger(stop_ev)
+                    await self._wait_interval_or_trigger(stop_event)
 
             with SuppressTask():
                 self._blacklist.save(self._config.paths.cache_blacklist)
@@ -99,8 +101,8 @@ class PrefetchService(ServiceRunnable):
         try:
             await self._ensure_dirs(log_event)
             return Success("OK")
-        except Exception as e:
-            return Error(f"check failed: {e!s}")
+        except Exception as exception:
+            return Error(f"check failed: {exception!s}")
 
     async def receive(
         self, ready_event: asyncio.Event, message: ControlMessage, log_event: FilteringBoundLogger
@@ -108,16 +110,16 @@ class PrefetchService(ServiceRunnable):
         if message.correlation_id is not None:
             match message.action:
                 case ControlAction.MISSING_AUDIO_RESPONSE, ControlAction.TRACK_BY_ID_RESPONSE:
-                    fut = self._pending.pop(str(message.correlation_id), None)
-                    if fut and not fut.done():
+                    future = self._pending.pop(str(message.correlation_id), None)
+                    if future and not future.done():
                         items = message.payload.get("tracks", []) or []
                         tracks: list[Track] = []
-                        for t in items:
+                        for track in items:
                             try:
-                                tracks.append(Track(**t))
+                                tracks.append(Track(**track))
                             except Exception:
-                                tracks.append(Track.from_row(t))
-                        fut.set_result(tracks)
+                                tracks.append(Track.from_row(track))
+                        future.set_result(tracks)
                         return Success("accepted")
                 case _:
                     return Error("unknown action")
@@ -128,105 +130,110 @@ class PrefetchService(ServiceRunnable):
                 return Success("triggered")
             case ControlAction.LOAD_HOT:
                 match await self._schedule_track(message, log_event):
-                    case Error() as err:
-                        return err
-                    case Success() as ok:  # scheduled
+                    case Error() as error:
+                        return error
+                    case Success() as ok:
                         return ok
-                    case ColdReady(youtube_id=yid, path=cold):
+                    case ColdReady(youtube_id=youtube_id, path=cold):
                         await self._ensure_hot_link(cold, log_event)
-                        await self._update_cache_hot(yid, log_event)
+                        await self._update_cache_hot(youtube_id, log_event)
                         return Success("hot-ready")
 
             case ControlAction.RECALC_LUFS:
                 match await self._schedule_track(message, log_event):
-                    case Error() as err:
-                        return err
-                    case Success() as ok:  # scheduled
+                    case Error() as error:
+                        return error
+                    case Success() as ok:
                         return ok
-                    case ColdReady(youtube_id=yid, path=cold):
+                    case ColdReady(youtube_id=youtube_id, path=cold):
                         lufs = await self._measure_lufs(cold, log_event)
                         await self._bus.send(
                             ControlMessage(
                                 node=ControlNode.DB,
                                 action=ControlAction.UPDATE_TRACK_AUDIO,
                                 payload={
-                                    "youtube_id": yid,
+                                    "youtube_id": youtube_id,
                                     "loudness_lufs": float(lufs) if lufs is not None else None,
                                 },
                             )
                         )
-                        return Success(f"youtube_id: {yid}, loudness_lufs: {lufs}")
+                        return Success(f"youtube_id: {youtube_id}, loudness_lufs: {lufs}")
             case ControlAction.STATS:
                 return Success(str(self._metrics.as_dict()))
             case ControlAction.BLACKLIST_CLEAR:
                 self._blacklist.clear()
                 return Success("blacklist cleared")
             case ControlAction.BLACKLIST_REMOVE:
-                yid = message.payload.get("youtube_id")
-                if not yid:
+                youtube_id = message.payload.get("youtube_id")
+                if not youtube_id:
                     return Error("youtube_id required")
-                self._blacklist.remove(str(yid))
-                return Success(f"removed {yid}")
+                self._blacklist.remove(str(youtube_id))
+                return Success(f"removed {youtube_id}")
             case _:
                 return Error("unknown action")
 
     async def _schedule_track(
         self, message: ControlMessage, log: FilteringBoundLogger
     ) -> ColdReady | ControlResult:
-        yid = message.payload.get("youtube_id")
+        youtube_id = message.payload.get("youtube_id")
         track_id = message.payload.get("id")
-        if not (yid or track_id):
+        if not (youtube_id or track_id):
             return Error("id or youtube_id required")
-        if not yid and track_id:
-            tr = await self._request_track_by_id(int(track_id), log)
-            yid = tr.youtube_id if tr else None
-        if not yid:
+        if not youtube_id and track_id:
+            track_request = await self._request_track_by_id(int(track_id), log)
+            youtube_id = track_request.youtube_id if track_request else None
+        if not youtube_id:
             return Error("track not found")
-        cold = self._config.paths.cache_cold / f"{yid}.opus"
+        cold = self._config.paths.cache_cold / f"{youtube_id}.opus"
         if not cold.exists():
             self._trigger.set()
             return Success("scheduled")
-        return ColdReady(yid, cold)
+        return ColdReady(youtube_id, cold)
 
     async def _process_tracks_parallel(
-        self, tracks: list[Track], stop_ev: asyncio.Event, log: FilteringBoundLogger
+        self, tracks: list[Track], stop_event: asyncio.Event, log: FilteringBoundLogger
     ) -> None:
-        sem = asyncio.Semaphore(max(1, self._config.prefetch.concurrent_downloads))
+        semaphore = asyncio.Semaphore(max(1, self._config.prefetch.concurrent_downloads))
 
-        async def worker(tr: Track) -> None:
-            async with sem:
-                if stop_ev.is_set():
+        async def worker(track: Track) -> None:
+            async with semaphore:
+                if stop_event.is_set():
                     return
-                if self._blacklist.skip(tr.youtube_id):
+                if self._blacklist.skip(track.youtube_id):
                     return
 
-                cold_path = self._config.paths.cache_cold / f"{tr.youtube_id}.opus"
+                cold_path = self._config.paths.cache_cold / f"{track.youtube_id}.opus"
                 try:
                     if cold_path.exists():
                         self._metrics.hit()
                         await self._ensure_hot_link(cold_path, log)
-                        await self._update_track_cached(tr, cold_path)
-                        self._blacklist.reset(tr.youtube_id)
+                        await self._update_track_cached(track, cold_path)
+                        self._blacklist.reset(track.youtube_id)
                         return
 
-                    ok = await self._download_opus(tr, cold_path, log)
+                    ok = await self._download_opus(track, cold_path, log)
                     if ok and cold_path.exists():
                         self._metrics.miss()
                         lufs = await self._measure_lufs(cold_path, log)
                         await self._ensure_hot_link(cold_path, log)
-                        await self._update_track_downloaded(tr, cold_path, lufs)
-                        self._blacklist.reset(tr.youtube_id)
+                        await self._update_track_downloaded(track, cold_path, lufs)
+                        self._blacklist.reset(track.youtube_id)
                     else:
                         self._metrics.error()
-                        self._blacklist.fail(tr.youtube_id)
-                        await self._bump_fail_count(tr)
-                except Exception as e:
-                    log.error("worker error", id=tr.id, yid=tr.youtube_id, err=str(e))
+                        self._blacklist.fail(track.youtube_id)
+                        await self._bump_fail_count(track)
+                except Exception as exception:
+                    log.error(
+                        "worker error",
+                        id=track.id,
+                        youtube_id=track.youtube_id,
+                        error=str(exception),
+                    )
                     self._metrics.error()
-                    self._blacklist.fail(tr.youtube_id)
-                    await self._bump_fail_count(tr)
+                    self._blacklist.fail(track.youtube_id)
+                    await self._bump_fail_count(track)
 
-        await asyncio.gather(*(worker(t) for t in tracks))
+        await asyncio.gather(*(worker(track) for track in tracks))
 
     async def _ensure_dirs(self, log: FilteringBoundLogger) -> None:
         self._config.paths.cache_cold.mkdir(parents=True, exist_ok=True)
@@ -236,8 +243,8 @@ class PrefetchService(ServiceRunnable):
 
     async def _request_missing_tracks(self, limit: int, log: FilteringBoundLogger) -> list[Track]:
         correlation_id = uuid4()
-        fut: asyncio.Future[list[Track]] = asyncio.get_event_loop().create_future()
-        self._pending[str(correlation_id)] = fut
+        future: asyncio.Future[list[Track]] = asyncio.get_event_loop().create_future()
+        self._pending[str(correlation_id)] = future
         await self._bus.send(
             ControlMessage(
                 node=ControlNode.DB,
@@ -247,7 +254,7 @@ class PrefetchService(ServiceRunnable):
             )
         )
         try:
-            return await asyncio.wait_for(fut, timeout=10.0)
+            return await asyncio.wait_for(future, timeout=10.0)
         except asyncio.TimeoutError:  # noqa: UP041
             await self._pending.pop(str(correlation_id), None)
             log.warning("db reply timeout MISSING_AUDIO", name=self.name)
@@ -255,8 +262,8 @@ class PrefetchService(ServiceRunnable):
 
     async def _request_track_by_id(self, track_id: int, log: FilteringBoundLogger) -> Track | None:
         correlation_id = uuid4()
-        fut: asyncio.Future[list[Track]] = asyncio.get_event_loop().create_future()
-        self._pending[str(correlation_id)] = fut
+        future: asyncio.Future[list[Track]] = asyncio.get_event_loop().create_future()
+        self._pending[str(correlation_id)] = future
         await self._bus.send(
             ControlMessage(
                 node=ControlNode.DB,
@@ -266,16 +273,18 @@ class PrefetchService(ServiceRunnable):
             )
         )
         try:
-            res = await asyncio.wait_for(fut, timeout=5.0)
+            res = await asyncio.wait_for(future, timeout=5.0)
             return res[0] if res else None
         except asyncio.TimeoutError:  # noqa: UP041
             await self._pending.pop(str(correlation_id), None)
             log.warning("db reply timeout TRACK_BY_ID", name=self.name)
             return None
 
-    async def _update_track_downloaded(self, t: Track, cold_path: Path, lufs: float | None) -> None:
+    async def _update_track_downloaded(
+        self, track: Track, cold_path: Path, lufs: float | None
+    ) -> None:
         payload: dict[str, Any] = {
-            "id": t.id,
+            "id": track.id,
             "audio_path": str(cold_path),
             "loudness_lufs": float(lufs) if lufs is not None else None,
             "cache_state": "cold",
@@ -288,9 +297,9 @@ class PrefetchService(ServiceRunnable):
             )
         )
 
-    async def _update_track_cached(self, t: Track, cold_path: Path) -> None:
+    async def _update_track_cached(self, track: Track, cold_path: Path) -> None:
         payload: dict[str, Any] = {
-            "id": t.id,
+            "id": track.id,
             "audio_path": str(cold_path),
             "cache_state": "cold",
             "last_prefetch_at": now_iso(),
@@ -314,17 +323,17 @@ class PrefetchService(ServiceRunnable):
             )
         )
 
-    async def _bump_fail_count(self, t: Track) -> None:
+    async def _bump_fail_count(self, track: Track) -> None:
         await self._bus.send(
             ControlMessage(
                 node=ControlNode.DB,
                 action=ControlAction.TRACK_INCREMENT_FAIL_COUNT,
-                payload={"id": t.id, "fail_count_inc": 1, "last_prefetch_at": now_iso()},
+                payload={"id": track.id, "fail_count_inc": 1, "last_prefetch_at": now_iso()},
             )
         )
 
-    async def _download_opus(self, t: Track, out_path: Path, log: FilteringBoundLogger) -> bool:
-        url = t.url or watch_url(t.youtube_id)
+    async def _download_opus(self, track: Track, out_path: Path, log: FilteringBoundLogger) -> bool:
+        url = track.url or watch_url(track.youtube_id)
         out_tmpl = str(out_path.with_name("%(id)s.%(ext)s"))
         args = [
             "yt-dlp",
@@ -344,12 +353,14 @@ class PrefetchService(ServiceRunnable):
         if self._config.paths.cookies:
             args += ["--cookies", str(self._config.paths.cookies)]
 
-        code, _out, err = await proc_exec(*args, timeout=self._config.prefetch.download_timeout_sec)
+        code, _out, error = await proc_exec(
+            *args, timeout=self._config.prefetch.download_timeout_sec
+        )
         if code != 0:
-            log.warning("yt-dlp failed", name=self.name, code=code, err=(err or "").strip())
+            log.warning("yt-dlp failed", name=self.name, code=code, err=(error or "").strip())
             return False
 
-        expected = out_path.with_name(f"{t.youtube_id}.opus")
+        expected = out_path.with_name(f"{track.youtube_id}.opus")
         if expected != out_path:
             with SuppressTask():
                 if out_path.exists():
@@ -371,13 +382,13 @@ class PrefetchService(ServiceRunnable):
             "null",
             "-",
         ]
-        code, _out, err = await proc_exec(*args, timeout=60)
+        code, _out, error = await proc_exec(*args, timeout=60)
         if code != 0:
             log.warning("lufs measure failed", name=self.name, code=code)
             return None
-        m = re.search(r"I:\s*(-?\d+(?:\.\d+)?)\s*LUFS", err)
+        match = re.search(r"I:\s*(-?\d+(?:\.\d+)?)\s*LUFS", error)
         try:
-            return float(m.group(1)) if m else None
+            return float(match.group(1)) if match else None
         except Exception:
             return None
 
@@ -399,50 +410,50 @@ class PrefetchService(ServiceRunnable):
     async def _enforce_cold_quota(self, _log: FilteringBoundLogger) -> None:
         files: list[tuple[Path, float, int]] = []
         total = 0
-        for p in iter_files(self._config.paths.cache_cold):
+        for path in iterate_files(self._config.paths.cache_cold):
             try:
-                st = p.stat()
-                files.append((p, st.st_mtime, st.st_size))
-                total += st.st_size
+                stat = path.stat()
+                files.append((path, stat.st_mtime, stat.st_size))
+                total += stat.st_size
             except Exception:
                 continue
         if total <= self._config.prefetch.cold_quota_bytes:
             return
         files.sort(key=lambda x: x[1])
-        idx = 0
-        while total > self._config.prefetch.cold_quota_bytes and idx < len(files):
-            p, _mt, sz = files[idx]
+        index = 0
+        while total > self._config.prefetch.cold_quota_bytes and index < len(files):
+            path, _, size = files[index]
             with SuppressTask():
-                p.unlink()
-            total -= sz
-            idx += 1
+                path.unlink()
+            total -= size
+            index += 1
 
     async def _enforce_hot_count(self, _log: FilteringBoundLogger) -> None:
         files: list[tuple[Path, float]] = []
-        for p in iter_files(self._config.paths.cache_hot):
+        for path in iterate_files(self._config.paths.cache_hot):
             try:
-                st = p.stat()
-                files.append((p, st.st_mtime))
+                stat = path.stat()
+                files.append((path, stat.st_mtime))
             except Exception:
                 continue
         if len(files) <= self._config.prefetch.hot_max_items:
             return
-        files.sort(key=lambda x: x[1])
+        files.sort(key=lambda file: file[1])
         need_remove = len(files) - self._config.prefetch.hot_max_items
         for i in range(need_remove):
-            p, _ = files[i]
+            path, _ = files[i]
             with SuppressTask():
-                p.unlink()
+                path.unlink()
 
-    async def _wait_interval_or_trigger(self, stop_ev: asyncio.Event) -> None:
+    async def _wait_interval_or_trigger(self, stop_event: asyncio.Event) -> None:
         sleeper = asyncio.create_task(asyncio.sleep(self._config.prefetch.interval_sec))
         trigger = asyncio.create_task(self._trigger.wait())
-        stopper = asyncio.create_task(stop_ev.wait())
+        stopper = asyncio.create_task(stop_event.wait())
         _, pending = await asyncio.wait(
             {sleeper, trigger, stopper}, return_when=asyncio.FIRST_COMPLETED
         )
-        for t in pending:
-            t.cancel()
+        for task in pending:
+            task.cancel()
             with SuppressTask():
-                await t
+                await task
         self._trigger.clear()

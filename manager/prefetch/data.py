@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from manager.prefetch.utils import iter_files
+from manager.prefetch.utils import iterate_files
 
 
 @dataclass(slots=True)
@@ -31,14 +31,14 @@ class Metrics:
 
     def update_spaces(self, cold_dir: Path, hot_dir: Path, quota: int) -> None:
         used = 0
-        for p in iter_files(cold_dir):
+        for path in iterate_files(cold_dir):
             try:
-                used += p.stat().st_size
+                used += path.stat().st_size
             except Exception:
                 continue
         self.cold_used_bytes = used
         self.cold_free_bytes = max(quota - used, 0)
-        self.hot_count = sum(1 for _ in iter_files(hot_dir))
+        self.hot_count = sum(1 for _ in iterate_files(hot_dir))
         self.last_loop_ts = time.time()
 
     def as_dict(self) -> dict[str, Any]:
@@ -80,23 +80,23 @@ class BlacklistState:
         tmp.write_text(json.dumps(self.data, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, path)
 
-    def skip(self, yid: str) -> bool:
-        rec = self.data.get(yid)
+    def skip(self, youtube_id: str) -> bool:
+        rec = self.data.get(youtube_id)
         if not rec:
             return False
         return float(rec.get("until_ts", 0.0)) > time.time()
 
-    def fail(self, yid: str) -> None:
-        rec = self.data.get(yid) or {"fails": 0, "until_ts": 0.0}
+    def fail(self, youtube_id: str) -> None:
+        rec = self.data.get(youtube_id) or {"fails": 0, "until_ts": 0.0}
         fails = int(rec.get("fails", 0)) + 1
         delay = min(3600, 30 * (2 ** (fails - 1)))  # 30s, 60s, 120s, ..., cap 1h
-        self.data[yid] = {"fails": fails, "until_ts": time.time() + delay}
+        self.data[youtube_id] = {"fails": fails, "until_ts": time.time() + delay}
 
-    def reset(self, yid: str) -> None:
-        self.data.pop(yid, None)
+    def reset(self, youtube_id: str) -> None:
+        self.data.pop(youtube_id, None)
 
-    def remove(self, yid: str) -> None:
-        self.data.pop(yid, None)
+    def remove(self, youtube_id: str) -> None:
+        self.data.pop(youtube_id, None)
 
     def clear(self) -> None:
         self.data.clear()
