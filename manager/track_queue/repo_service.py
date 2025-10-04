@@ -20,7 +20,6 @@ from manager.track_queue.repo import TracksRepo
 
 
 class RepoService(ServiceRunnable):
-
     def __init__(self, node_id: ControlNode, config: AppConfig | None = None) -> None:
         super().__init__(node_id=node_id)
         self.node_id = node_id
@@ -83,24 +82,23 @@ class RepoService(ServiceRunnable):
         if not ready_event.is_set():
             return Error("service not ready")
 
-        if message.action != ControlAction.INSERT_TRACKS:
-            return Error(f"unknown action {message.action}")
+        match message.action:
+            case ControlAction.INSERT_TRACKS:
+                return await self._insert(message, log_event)
+            case _:
+                return Error(f"unknown action {message.action}")
 
-        # Попытка преобразовать payload к списку
-        try:
-            payload = list(message.payload)
-        except TypeError:
-            log_event.error("payload is not iterable", name=self.name, error=repr(message.payload))
-            return Error("invalid payload type")
-
+    async def _insert(
+        self, message: ControlMessage, log_event: FilteringBoundLogger
+    ) -> ControlResult:
         try:
             self._ensure_repos()
             assert self._tracks is not None
 
-            log_event.debug("receive payload", name=self.name, size=len(payload))
+            log_event.debug("receive payload", name=self.name, size=len(message.payload))
 
             upserted: int = 0
-            for track in payload:
+            for track in message.payload:
                 log_event.debug(
                     "upsert start",
                     youtube_id=track.get("youtube_id"),
@@ -124,6 +122,6 @@ class RepoService(ServiceRunnable):
 
             log_event.info("tracks batch ingested", name=self.name, count=upserted)
             return Success(f"ingested {upserted}")
-        except Exception as exc:
-            log_event.error("ingest failed", name=self.name, error=repr(exc))
+        except Exception as exception:
+            log_event.error("ingest failed", name=self.name, error=repr(exception))
             return Error("ingest failed")
