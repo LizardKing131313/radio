@@ -3,6 +3,7 @@ import asyncio
 from manager.hls import HLS
 from manager.liquidsoap.liquidsoap import LiquidSoap
 from manager.logger import configure_logging
+from manager.prefetch.prefetch import PrefetchService
 from manager.runner.control import ControlBus, ControlNode
 from manager.runner.node import Node
 from manager.runner.runner import Runner
@@ -22,6 +23,11 @@ async def start_radio() -> None:
         Node(
             id=ControlNode.SEARCH,
             runnable=SearchService(node_id=ControlNode.SEARCH, control_bus=control_bus),
+            parent={ControlNode.DB},
+        ),
+        Node(
+            id=ControlNode.FETCH,
+            runnable=PrefetchService(node_id=ControlNode.FETCH, control_bus=control_bus),
             parent={ControlNode.DB},
         ),
         Node(id=ControlNode.FFMPEG, runnable=HLS(node_id=ControlNode.FFMPEG)),

@@ -49,7 +49,7 @@ class PrefetchService(ServiceRunnable):
     """
 
     def __init__(
-        self, node_id: ControlNode, bus: ControlBus, config: AppConfig | None = None
+        self, node_id: ControlNode, control_bus: ControlBus, config: AppConfig | None = None
     ) -> None:
         super().__init__(node_id=node_id)
         self.node_id = node_id
@@ -57,7 +57,7 @@ class PrefetchService(ServiceRunnable):
         self._metrics = Metrics()
         self._blacklist = BlacklistState.load(self._config.paths.cache_blacklist)
         self._trigger = asyncio.Event()
-        self._bus = bus
+        self._bus = control_bus
         self._pending: dict[str, asyncio.Future[list[Track]]] = {}
 
     # noinspection PyTypeHints
@@ -79,8 +79,8 @@ class PrefetchService(ServiceRunnable):
                     )
                     if tracks:
                         await self._process_tracks_parallel(tracks, stop_event, log)
-                except Exception as e:
-                    log.error("prefetch loop error", name=self.name, err=str(e))
+                except Exception as exception:
+                    log.error("prefetch loop error", name=self.name, error=str(exception))
                 finally:
                     self._metrics.update_spaces(
                         self._config.paths.cache_cold,
@@ -256,7 +256,9 @@ class PrefetchService(ServiceRunnable):
         try:
             return await asyncio.wait_for(future, timeout=10.0)
         except asyncio.TimeoutError:  # noqa: UP041
-            await self._pending.pop(str(correlation_id), None)
+            future = self._pending.pop(str(correlation_id), None)
+            if future and not future.done():
+                future.cancel()
             log.warning("db reply timeout MISSING_AUDIO", name=self.name)
             return []
 
@@ -276,7 +278,9 @@ class PrefetchService(ServiceRunnable):
             res = await asyncio.wait_for(future, timeout=5.0)
             return res[0] if res else None
         except asyncio.TimeoutError:  # noqa: UP041
-            await self._pending.pop(str(correlation_id), None)
+            future = self._pending.pop(str(correlation_id), None)
+            if future and not future.done():
+                future.cancel()
             log.warning("db reply timeout TRACK_BY_ID", name=self.name)
             return None
 
@@ -449,11 +453,14 @@ class PrefetchService(ServiceRunnable):
         sleeper = asyncio.create_task(asyncio.sleep(self._config.prefetch.interval_sec))
         trigger = asyncio.create_task(self._trigger.wait())
         stopper = asyncio.create_task(stop_event.wait())
-        _, pending = await asyncio.wait(
-            {sleeper, trigger, stopper}, return_when=asyncio.FIRST_COMPLETED
-        )
-        for task in pending:
-            task.cancel()
-            with SuppressTask():
-                await task
-        self._trigger.clear()
+        pending = None
+        try:
+            _, pending = await asyncio.wait(
+                {sleeper, trigger, stopper}, return_when=asyncio.FIRST_COMPLETED
+            )
+        finally:
+            for task in pending:
+                task.cancel()
+                with SuppressTask():
+                    await task
+            self._trigger.clear()
