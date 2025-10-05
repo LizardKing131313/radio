@@ -79,8 +79,6 @@ class LiquidSoap(ProcessRunnable):
             case ControlAction.POP:
                 return await self._telnet.hot_next()
             case ControlAction.QUEUE:
-                if message.correlation_id is None:
-                    return Error("unknown action")
                 result = await self._telnet.rq_queue()
                 queue = ""
                 if result.is_ok:

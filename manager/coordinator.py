@@ -57,7 +57,6 @@ class CoordinatorService(ServiceRunnable):
                 hot_window_size=self._hot_window_size,
                 node_id=self.node_id,
             )
-
             try:
                 while not stop_event.is_set():
                     await self._tick_once(log)
@@ -71,11 +70,9 @@ class CoordinatorService(ServiceRunnable):
                         task.cancel()
             except Exception as exception:
                 log.error("coordinator loop crashed", error=str(exception), node_id=self.node_id)
-                return 1
             finally:
                 log.info("coordinator stopped", node_id=self.node_id)
-
-            return 0
+            return None
 
         return run
 
@@ -92,6 +89,9 @@ class CoordinatorService(ServiceRunnable):
     ) -> ControlResult:
         if message.action == ControlAction.QUEUE_RESPONSE:
             try:
+                log_event.info(
+                    event="LS response", node_id=self.node_id, payload=message.payload.data
+                )
                 payload = message.payload.data if message.payload else {}
                 queue_raw = str(payload.get("queue", "")).strip()
                 self._last_queue_raw = queue_raw
@@ -112,14 +112,14 @@ class CoordinatorService(ServiceRunnable):
         try:
             await asyncio.wait_for(self._response_event.wait(), timeout=2.5)
         except TimeoutError:
-            log.debug("ls queue response timeout", node_id=self.node_id)
+            log.warning("ls queue response timeout", node_id=self.node_id)
             return
         finally:
             self._response_event = None
 
         uri_list = self._normalize_queue_lines(self._last_queue_raw)
         if not uri_list:
-            log.debug("empty queue or unparsable", node_id=self.node_id)
+            log.warning("empty queue or unparsable", node_id=self.node_id)
             return
 
         ids = self._unique_keep_order(self._extract_youtube_id(uri) for uri in uri_list)

@@ -21,12 +21,9 @@ base = audio_to_stereo(base)
 base = normalize(target=-14.0, base)
 base = crossfade(smart=true, duration=6.0, base)
 
-# --- Requests
-rq = request.queue(id="rq")
-
 # --- Infallible tail (silence, not a beep)
-silence = blank(duration=0.5)     # короткая тишина, а не бесконечный "трек"
-program_raw = fallback(track_sensitive=false, [rq, base, silence])
+silence = blank(duration=0.5)     # short silence as last resort
+program_raw = fallback(track_sensitive=false, [base, silence])
 
 # --- Now Playing helpers
 def np_format_line(m) =
@@ -40,7 +37,6 @@ end
 def write_nowplaying(m) =
   # Plain text (one line)
   file.write(append=false, data=np_format_line(m), np_txt_file)
-
   # Simple KV for downstream JSON (no plugins needed)
   title  = list.assoc(default="Unknown Title",  "title",  m)
   artist = list.assoc(default="Unknown Artist", "artist", m)
@@ -53,9 +49,4 @@ end
 program = source.on_metadata(program_raw, write_nowplaying)
 
 # --- Output: FIFO WAV for ffmpeg
-# Ensure FIFO exists: mkfifo /opt/radio/runtime/fifo/radio.wav
 output.file(%wav, fifo_wav, program)
-
-
-# s = sine() # тестовый генератор
-# out = output.dummy(s) # чтобы процесс не умирал
