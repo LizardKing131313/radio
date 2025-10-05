@@ -16,7 +16,9 @@ async def start_radio() -> None:
     control_bus = ControlBus()
 
     nodes = [
-        Node(id=ControlNode.DB, runnable=RepoService(node_id=ControlNode.DB)),
+        Node(
+            id=ControlNode.DB, runnable=RepoService(node_id=ControlNode.DB, control_bus=control_bus)
+        ),
         Node(
             id=ControlNode.SEARCH,
             runnable=SearchService(node_id=ControlNode.SEARCH, control_bus=control_bus),

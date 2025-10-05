@@ -126,6 +126,31 @@ class TracksRepo:
             raise KeyError("track not found")
         return Track.from_row(row)
 
+    def get_missing_audio(self, limit: int = 100) -> list[Track]:
+        """
+        Return tracks which need audio download (audio_path is NULL or file missing).
+        Ordered by least recently prefetched / added_at.
+        """
+
+        rows = (
+            self.db.connect()
+            .execute(
+                """
+                SELECT *
+                FROM tracks
+                WHERE deleted_at IS NULL
+                  AND is_active = 1
+                  AND (audio_path IS NULL OR audio_path = '')
+                  AND (cache_state IS NULL OR cache_state = 'none')
+                ORDER BY last_prefetch_at IS NULL DESC, last_prefetch_at, added_at
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            .fetchall()
+        )
+        return [Track.from_row(row) for row in rows]
+
     def touch_play(self, track_id: int) -> None:
         # noinspection SqlResolve
         self.db.connect().execute(
@@ -177,6 +202,40 @@ class TracksRepo:
             WHERE id = ?
             """,
             (track_id,),
+        )
+
+    def update_track_audio(
+        self, track_id: int, *, audio_path: str, loudness_lufs: float | None = None
+    ) -> None:
+        """Записывает путь к скачанному файлу и loudness (LUFS)."""
+        self.db.connect().execute(
+            """
+            UPDATE tracks
+            SET
+                audio_path = ?,
+                loudness_lufs = COALESCE(?, loudness_lufs),
+                cache_state = 'cold',
+                last_prefetch_at = (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                fail_count = 0
+            WHERE id = ?
+            """,
+            (audio_path, loudness_lufs, track_id),
+        )
+
+    def update_track_cached(
+        self, track_id: int, *, cache_state: str, cache_hot_until: str | None = None
+    ) -> None:
+        """Помечает трек как прогретый (hot/cold)."""
+        self.db.connect().execute(
+            """
+            UPDATE tracks
+            SET
+                cache_state = ?,
+                cache_hot_until = COALESCE(?, cache_hot_until),
+                last_prefetch_at = (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            WHERE id = ?
+            """,
+            (cache_state, cache_hot_until, track_id),
         )
 
 

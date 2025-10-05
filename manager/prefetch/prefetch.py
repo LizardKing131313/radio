@@ -328,7 +328,7 @@ class PrefetchService(ServiceRunnable):
             ControlMessage(
                 node=ControlNode.DB,
                 action=ControlAction.TRACK_INCREMENT_FAIL_COUNT,
-                payload={"id": track.id, "fail_count_inc": 1, "last_prefetch_at": now_iso()},
+                payload={"id": track.id},
             )
         )
 
