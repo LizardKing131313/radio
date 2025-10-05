@@ -12,6 +12,7 @@ from manager.runner.control import (
     ControlNode,
     ControlResult,
     Error,
+    PayloadEnvelope,
     Success,
 )
 from manager.runner.service_runnable import ServiceRun, ServiceRunnable
@@ -76,22 +77,29 @@ class RepoService(ServiceRunnable):
             match message.action:
                 case ControlAction.INSERT_TRACKS:
                     upserted: int = 0
-                    for track in message.payload:
+                    for track in message.payload.data:
                         self._tracks.upsert(
-                            youtube_id=track["youtube_id"],
-                            title=track["title"],
-                            duration_sec=int(track["duration_sec"]),
+                            youtube_id=track.youtube_id,
+                            title=track.title,
+                            duration_sec=int(track.duration_sec),
                             url=track["url"],
-                            channel=track.get("channel"),
-                            thumbnail_url=track.get("thumbnail_url"),
-                            is_active=int(track.get("is_active", 1)),
+                            channel=track.channel,
+                            thumbnail_url=track.thumbnail_url,
+                            is_active=int(track.is_active, 1),
                         )
                         upserted += 1
                     return Success(f"ingested {upserted}")
                 case ControlAction.MISSING_AUDIO:
-                    limit = int(message.payload.get("limit", 10))
+                    log_event.info(
+                        event="MISSING_AUDIO", node_id="DB", payload=f"{message.payload}"
+                    )
+                    limit = int(message.payload.data.get("limit"))
+                    log_event.info(event="MISSING_AUDIO", node_id="DB", limit=limit)
                     items = self._tracks.get_missing_audio(limit)
-                    payload = [track.to_dict() for track in items]
+                    payload = PayloadEnvelope(
+                        type="list", data=[track.to_dict() for track in items]
+                    )
+                    log_event.info(event="MISSING_AUDIO", node_id="DB", new_payload=f"{payload}")
                     await self._bus.send(
                         ControlMessage(
                             action=ControlAction.MISSING_AUDIO_RESPONSE,
@@ -100,11 +108,11 @@ class RepoService(ServiceRunnable):
                             correlation_id=message.correlation_id,
                         )
                     )
-                    return Success(f"sent {len(payload)}")
+                    return Success(f"sent {len(payload.data)}")
                 case ControlAction.TRACK_BY_ID:
-                    track_id = int(message.payload["id"])
+                    track_id = int(message.payload.data.get("id"))
                     track = self._tracks.get(track_id)
-                    payload = [track.to_dict()] if track else []
+                    payload = PayloadEnvelope(type="list", data=[track.to_dict()] if track else [])
                     await self._bus.send(
                         ControlMessage(
                             action=ControlAction.TRACK_BY_ID_RESPONSE,
@@ -115,31 +123,31 @@ class RepoService(ServiceRunnable):
                     )
                     return Success("sent 1" if track else "not found")
                 case ControlAction.TRACK_INCREMENT_FAIL_COUNT:
-                    self._tracks.increment_fail_count(track_id=int(message.payload["id"]))
+                    self._tracks.increment_fail_count(track_id=int(message.payload.data.get("id")))
                     return Success("updated")
                 case ControlAction.UPDATE_TRACK_AUDIO:
                     self._tracks.update_track_audio(
-                        track_id=int(message.payload["id"]),
-                        audio_path=str(message.payload["audio_path"]),
+                        track_id=int(message.payload.data.get("id")),
+                        audio_path=str(message.payload.data.get("audio_path")),
                         loudness_lufs=(
-                            float(message.payload["loudness_lufs"])
-                            if message.payload.get("loudness_lufs") is not None
+                            float(message.payload.data.get("loudness_lufs"))
+                            if message.payload.data.get("loudness_lufs") is not None
                             else None
                         ),
                     )
                     return Success("updated")
                 case ControlAction.UPDATE_TRACK_CACHED:
                     self._tracks.update_track_cached(
-                        track_id=int(message.payload["id"]),
-                        cache_state=str(message.payload["cache_state"]),
+                        track_id=int(message.payload.data.get("id")),
+                        cache_state=str(message.payload.data.get("cache_state")),
                     )
                     return Success("updated")
                 case ControlAction.UPDATE_TRACK_CACHE_STATE:
                     self._tracks.update_cache_state(
-                        track_id=int(message.payload["id"]),
-                        cache_state=str(message.payload["cache_state"]),
-                        cache_hot_until=message.payload.get("cache_hot_until"),
-                        last_prefetch_at=str(message.payload["last_prefetch_at"]),
+                        track_id=int(message.payload.data.get("id")),
+                        cache_state=str(message.payload.data.get("cache_state")),
+                        cache_hot_until=message.payload.data.get("cache_hot_until"),
+                        last_prefetch_at=str(message.payload.data.get("last_prefetch_at")),
                     )
                     return Success("updated")
                 case _:

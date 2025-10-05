@@ -6,6 +6,8 @@ from enum import StrEnum
 from typing import Any, Literal, TypeAlias
 from uuid import UUID, uuid4
 
+from pydantic import BaseModel, Field
+
 
 class ControlNode(StrEnum):
     """Список всех нод под управлением раннера"""
@@ -61,6 +63,14 @@ class ControlAction(StrEnum):
     BLACKLIST_REMOVE = "BLACKLIST_REMOVE"
 
 
+class PayloadEnvelope(BaseModel):
+    """Содержание сообщения"""
+
+    version: int = Field(default=1, ge=1)
+    type: str
+    data: Any
+
+
 @dataclass(slots=True, frozen=True)
 class ControlMessage:
     """Управляющее сообщение для процесса"""
@@ -70,7 +80,7 @@ class ControlMessage:
     # имя узла процесса
     node: ControlNode | None = None
     # данные для выполнения действия
-    payload: Any | None = None
+    payload: PayloadEnvelope | None = None
     # ид сообщения
     correlation_id: UUID = field(default_factory=uuid4)
 

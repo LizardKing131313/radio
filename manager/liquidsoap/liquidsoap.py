@@ -22,7 +22,6 @@ from manager.runner.process_runnable import ProcessCommand, ProcessRunnable
 
 
 class LiquidSoap(ProcessRunnable):
-
     health_interval_sec: ClassVar[float] = 5.0
 
     def __init__(self, node_id: ControlNode, config: AppConfig | None = None) -> None:
@@ -71,7 +70,7 @@ class LiquidSoap(ProcessRunnable):
             case ControlAction.SKIP:
                 return await self._telnet.hot_skip()
             case ControlAction.PUSH:
-                return await self._telnet.hot_uri(str(message.payload))
+                return await self._telnet.hot_uri(str(message.payload.data.get("hot_uri")))
             case ControlAction.POP:
                 return await self._telnet.hot_next()
             case ControlAction.QUEUE:

@@ -29,6 +29,7 @@ from manager.runner.control import (
     ControlNode,
     ControlResult,
     Error,
+    PayloadEnvelope,
     Success,
 )
 from manager.runner.service_runnable import ServiceRun, ServiceRunnable
@@ -361,5 +362,9 @@ class SearchService(ServiceRunnable):
             chunk = tracks[i : i + size]
             log.debug("publish", chunk_index=i)
             await self._control_bus.send(
-                ControlMessage(ControlAction.INSERT_TRACKS, ControlNode.DB, chunk)
+                ControlMessage(
+                    ControlAction.INSERT_TRACKS,
+                    ControlNode.DB,
+                    PayloadEnvelope(type="list", data=chunk),
+                )
             )

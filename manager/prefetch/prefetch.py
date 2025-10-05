@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import re
 import shutil
@@ -27,16 +28,11 @@ from manager.runner.control import (
     ControlNode,
     ControlResult,
     Error,
+    PayloadEnvelope,
     Success,
 )
 from manager.runner.service_runnable import ServiceRun, ServiceRunnable
 from manager.track_queue.models import Track
-
-
-# Notes:
-# - DB I/O is done via ControlBus messages only.
-# - All paths/limits/TTLs come from PrefetchConfig (no hardcoded dirs).
-# - User-facing strings are English-only.
 
 
 class PrefetchService(ServiceRunnable):
@@ -107,12 +103,24 @@ class PrefetchService(ServiceRunnable):
     async def receive(
         self, ready_event: asyncio.Event, message: ControlMessage, log_event: FilteringBoundLogger
     ) -> ControlResult:
+        log_event.info(event=f"received message {message!r}", node_id=self.node_id)
         if message.correlation_id is not None:
+            log_event.info(
+                event=f"received correlation_id {message.correlation_id}", node_id=self.node_id
+            )
             match message.action:
-                case ControlAction.MISSING_AUDIO_RESPONSE, ControlAction.TRACK_BY_ID_RESPONSE:
+                case ControlAction.MISSING_AUDIO_RESPONSE | ControlAction.TRACK_BY_ID_RESPONSE:
+                    log_event.info(
+                        event="action accepted", action=str(message.action), node_id=self.node_id
+                    )
                     future = self._pending.pop(str(message.correlation_id), None)
                     if future and not future.done():
-                        items = message.payload.get("tracks", []) or []
+                        log_event.info(
+                            event="future ready",
+                            correlation_id=message.correlation_id,
+                            node_id=self.node_id,
+                        )
+                        items = message.payload.data or []
                         tracks: list[Track] = []
                         for track in items:
                             try:
@@ -120,7 +128,13 @@ class PrefetchService(ServiceRunnable):
                             except Exception:
                                 tracks.append(Track.from_row(track))
                         future.set_result(tracks)
+                        log_event.info(event="tracks received", tracks=tracks, node_id=self.node_id)
                         return Success("accepted")
+                    log_event.warning(
+                        event="future not found",
+                        node_id=self.node_id,
+                        correlation_id=message.correlation_id,
+                    )
                 case _:
                     return Error("unknown action")
 
@@ -151,10 +165,13 @@ class PrefetchService(ServiceRunnable):
                             ControlMessage(
                                 node=ControlNode.DB,
                                 action=ControlAction.UPDATE_TRACK_AUDIO,
-                                payload={
-                                    "youtube_id": youtube_id,
-                                    "loudness_lufs": float(lufs) if lufs is not None else None,
-                                },
+                                payload=PayloadEnvelope(
+                                    type="dict",
+                                    data={
+                                        "youtube_id": youtube_id,
+                                        "loudness_lufs": float(lufs) if lufs is not None else None,
+                                    },
+                                ),
                             )
                         )
                         return Success(f"youtube_id: {youtube_id}, loudness_lufs: {lufs}")
@@ -164,7 +181,7 @@ class PrefetchService(ServiceRunnable):
                 self._blacklist.clear()
                 return Success("blacklist cleared")
             case ControlAction.BLACKLIST_REMOVE:
-                youtube_id = message.payload.get("youtube_id")
+                youtube_id = message.payload.data.get("youtube_id")
                 if not youtube_id:
                     return Error("youtube_id required")
                 self._blacklist.remove(str(youtube_id))
@@ -175,8 +192,8 @@ class PrefetchService(ServiceRunnable):
     async def _schedule_track(
         self, message: ControlMessage, log: FilteringBoundLogger
     ) -> ColdReady | ControlResult:
-        youtube_id = message.payload.get("youtube_id")
-        track_id = message.payload.get("id")
+        youtube_id = message.payload.data.get("youtube_id")
+        track_id = message.payload.data.get("id")
         if not (youtube_id or track_id):
             return Error("id or youtube_id required")
         if not youtube_id and track_id:
@@ -249,12 +266,12 @@ class PrefetchService(ServiceRunnable):
             ControlMessage(
                 node=ControlNode.DB,
                 action=ControlAction.MISSING_AUDIO,
-                payload={"limit": int(limit)},
+                payload=PayloadEnvelope(type="dict", data={"limit": int(limit)}),
                 correlation_id=correlation_id,
             )
         )
         try:
-            return await asyncio.wait_for(future, timeout=10.0)
+            return await asyncio.wait_for(future, timeout=30.0)
         except asyncio.TimeoutError:  # noqa: UP041
             future = self._pending.pop(str(correlation_id), None)
             if future and not future.done():
@@ -270,12 +287,12 @@ class PrefetchService(ServiceRunnable):
             ControlMessage(
                 node=ControlNode.DB,
                 action=ControlAction.TRACK_BY_ID,
-                payload={"id": int(track_id)},
+                payload=PayloadEnvelope(type="dict", data={"id": int(track_id)}),
                 correlation_id=correlation_id,
             )
         )
         try:
-            res = await asyncio.wait_for(future, timeout=5.0)
+            res = await asyncio.wait_for(future, timeout=15.0)
             return res[0] if res else None
         except asyncio.TimeoutError:  # noqa: UP041
             future = self._pending.pop(str(correlation_id), None)
@@ -297,7 +314,9 @@ class PrefetchService(ServiceRunnable):
         }
         await self._bus.send(
             ControlMessage(
-                node=ControlNode.DB, action=ControlAction.UPDATE_TRACK_AUDIO, payload=payload
+                node=ControlNode.DB,
+                action=ControlAction.UPDATE_TRACK_AUDIO,
+                payload=PayloadEnvelope(type="dict", data=payload),
             )
         )
 
@@ -310,7 +329,9 @@ class PrefetchService(ServiceRunnable):
         }
         await self._bus.send(
             ControlMessage(
-                node=ControlNode.DB, action=ControlAction.UPDATE_TRACK_CACHED, payload=payload
+                node=ControlNode.DB,
+                action=ControlAction.UPDATE_TRACK_CACHED,
+                payload=PayloadEnvelope(type="dict", data=payload),
             )
         )
 
@@ -323,7 +344,9 @@ class PrefetchService(ServiceRunnable):
         }
         await self._bus.send(
             ControlMessage(
-                node=ControlNode.DB, action=ControlAction.UPDATE_TRACK_CACHE_STATE, payload=payload
+                node=ControlNode.DB,
+                action=ControlAction.UPDATE_TRACK_CACHE_STATE,
+                payload=PayloadEnvelope(type="dict", data=payload),
             )
         )
 
@@ -332,7 +355,7 @@ class PrefetchService(ServiceRunnable):
             ControlMessage(
                 node=ControlNode.DB,
                 action=ControlAction.TRACK_INCREMENT_FAIL_COUNT,
-                payload={"id": track.id},
+                payload=PayloadEnvelope(type="dict", data={"id": track.id}),
             )
         )
 
@@ -396,20 +419,35 @@ class PrefetchService(ServiceRunnable):
         except Exception:
             return None
 
-    async def _ensure_hot_link(self, cold_path: Path, log: FilteringBoundLogger) -> None:
-        hot_path = self._config.paths.cache_hot / cold_path.name
+    async def _ensure_hot_link(self, cold_path: Path, log: FilteringBoundLogger) -> Path:
+        hot_dir: Path = self._config.paths.cache_hot
+        hot_dir.mkdir(parents=True, exist_ok=True)
+
+        hot_path: Path = hot_dir / cold_path.name
         if hot_path.exists():
-            with SuppressTask():
-                os.utime(hot_path, None)
-        else:
-            with SuppressTask():
-                hot_path.symlink_to(cold_path)
-            if not hot_path.exists():
-                with SuppressTask():
-                    os.link(cold_path, hot_path)
-            if not hot_path.exists():
-                shutil.copy2(cold_path, hot_path)
-        await self._enforce_hot_count(log)
+            os.utime(hot_path, None)
+            await self._enforce_hot_count(log)
+            return hot_path
+
+        tmp_path: Path = hot_path.with_suffix(hot_path.suffix + ".temp_copy")
+        try:
+            if tmp_path.exists():
+                with contextlib.suppress(Exception):
+                    tmp_path.unlink()
+
+            shutil.copy2(cold_path, tmp_path)
+            os.replace(tmp_path, hot_path)
+            os.utime(hot_path, None)
+
+            log.info("hot_copied", src=str(cold_path), dst=str(hot_path))
+            await self._enforce_hot_count(log)
+            return hot_path
+        except Exception as exc:
+            with contextlib.suppress(Exception):
+                if tmp_path.exists():
+                    tmp_path.unlink()
+            log.warning("hot_copy_failed", err=str(exc), src=str(cold_path), dst=str(hot_path))
+            raise
 
     async def _enforce_cold_quota(self, _log: FilteringBoundLogger) -> None:
         files: list[tuple[Path, float, int]] = []
