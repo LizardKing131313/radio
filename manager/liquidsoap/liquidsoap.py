@@ -11,10 +11,12 @@ from manager.liquidsoap.telnet import Telnet
 from manager.runner.backoff import BackoffPolicy
 from manager.runner.control import (
     ControlAction,
+    ControlBus,
     ControlMessage,
     ControlNode,
     ControlResult,
     Error,
+    PayloadEnvelope,
     Success,
 )
 from manager.runner.node import Action
@@ -24,11 +26,14 @@ from manager.runner.process_runnable import ProcessCommand, ProcessRunnable
 class LiquidSoap(ProcessRunnable):
     health_interval_sec: ClassVar[float] = 5.0
 
-    def __init__(self, node_id: ControlNode, config: AppConfig | None = None) -> None:
+    def __init__(
+        self, node_id: ControlNode, control_bus: ControlBus, config: AppConfig | None = None
+    ) -> None:
         super().__init__(node_id=node_id)
         self.node_id = node_id
         self._config = config or get_settings()
         self._telnet = Telnet()
+        self._bus = control_bus
 
     @cached_property
     def command(self) -> ProcessCommand:
@@ -74,6 +79,19 @@ class LiquidSoap(ProcessRunnable):
             case ControlAction.POP:
                 return await self._telnet.hot_next()
             case ControlAction.QUEUE:
-                return await self._telnet.rq_queue()
+                if message.correlation_id is None:
+                    return Error("unknown action")
+                result = await self._telnet.rq_queue()
+                queue = ""
+                if result.is_ok:
+                    queue = result.message
+                await self._bus.send(
+                    ControlMessage(
+                        action=ControlAction.QUEUE_RESPONSE,
+                        node=ControlNode.COORDINATOR,
+                        payload=PayloadEnvelope(type="dict", data={"queue": queue}),
+                    )
+                )
+                return result
             case _:
                 return Error("unknown action")

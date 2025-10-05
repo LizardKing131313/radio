@@ -70,6 +70,11 @@ class PrefetchSetting(BaseModel):
     concurrent_downloads: int = Field(default=4)
 
 
+class CoordinatorSetting(BaseModel):
+    interval_sec: int = Field(default=3)
+    hot_window_size: int = Field(default=3)
+
+
 class Secrets(BaseModel):
     """
     Holds secrets; values are optional at construction time and validated lazily on access.
@@ -133,6 +138,7 @@ class AppConfig(BaseSettings):
     hls: HLSSettings = Field(default_factory=HLSSettings)
     search: SearchSettings = Field(default_factory=SearchSettings)
     prefetch: PrefetchSetting = Field(default_factory=PrefetchSetting)
+    coordinator: CoordinatorSetting = Field(default_factory=CoordinatorSetting)
     secrets: Secrets = Field(default_factory=Secrets)
 
     # ---------- YAML loader with explicit env merge ----------
@@ -202,6 +208,7 @@ def get_settings() -> AppConfig:
 
 __all__ = [
     "AppConfig",
+    "CoordinatorSetting",
     "HLSSettings",
     "LiquidSoapSettings",
     "MissingConfigError",

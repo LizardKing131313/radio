@@ -19,6 +19,7 @@ class ControlNode(StrEnum):
     SEARCH = "SEARCH"
     API = "API"
     DB = "DB"
+    COORDINATOR = "COORDINATOR"
 
 
 class ControlAction(StrEnum):
@@ -38,6 +39,7 @@ class ControlAction(StrEnum):
     PUSH = "PUSH"
     POP = "POP"
     QUEUE = "QUEUE"
+    QUEUE_RESPONSE = "QUEUE_RESPONSE"
 
     # Search
     REINDEX = "REINDEX"

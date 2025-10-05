@@ -33,7 +33,7 @@ async def start_radio() -> None:
         Node(id=ControlNode.FFMPEG, runnable=HLS(node_id=ControlNode.FFMPEG)),
         Node(
             id=ControlNode.LIQUID_SOAP,
-            runnable=LiquidSoap(node_id=ControlNode.LIQUID_SOAP),
+            runnable=LiquidSoap(node_id=ControlNode.LIQUID_SOAP, control_bus=control_bus),
             parent={ControlNode.FFMPEG},
         ),
     ]
