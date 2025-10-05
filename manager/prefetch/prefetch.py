@@ -390,7 +390,7 @@ class PrefetchService(ServiceRunnable):
             *args, timeout=self._config.prefetch.download_timeout_sec
         )
         if code != 0:
-            log.warning("yt-dlp failed", name=self.name, code=code, err=(error or "").strip())
+            log.warning("yt-dlp failed", name=self.name, code=code, error=(error or "").strip())
             return False
 
         expected = out_path.with_name(f"{track.youtube_id}.opus")
@@ -452,7 +452,7 @@ class PrefetchService(ServiceRunnable):
             with contextlib.suppress(Exception):
                 if tmp_path.exists():
                     tmp_path.unlink()
-            log.warning("hot_copy_failed", err=str(exc), src=str(cold_path), dst=str(hot_path))
+            log.warning("hot_copy_failed", error=str(exc), src=str(cold_path), dst=str(hot_path))
             raise
 
     async def _enforce_cold_quota(self, _log: FilteringBoundLogger) -> None:
