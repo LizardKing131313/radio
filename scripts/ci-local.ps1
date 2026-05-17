@@ -145,7 +145,7 @@ function Invoke-QodanaCi {
             -v "${PWD}:/data/project" `
             -v "${PWD}/qodana:/data/results" `
             jetbrains/qodana-python-community:2025.2 `
-            --results-dir,/data/results
+            --results-dir /data/results
     }
 }
 
