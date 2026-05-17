@@ -47,7 +47,6 @@ repos:
         args: [ "--allow-multiple-documents" ]
       - id: check-toml
       - id: check-json
-        args: [ "-b", "main", "-b", "master" ]
 
   - repo: local
     hooks:

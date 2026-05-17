@@ -10,8 +10,13 @@ help:
 	@echo "  compile, compile-dev, compile-all, compile-every, compile-update"
 	@echo "  sync, sync-dev, sync-all"
 	@echo "  lint, format, typecheck, test, test-all, coverage, coverage-badge, ci"
+	@echo "  ci-local"
 	@echo "  k8s-status, k8s-db, k8s-db-forward"
 	@echo "  k8s-backups, k8s-backup, k8s-restore DUMP=./radio.dump"
+
+.PHONY: ci-local
+ci-local:
+	powershell -ExecutionPolicy Bypass -File scripts/ci-local.ps1
 
 .PHONY: k8s-status
 k8s-status:

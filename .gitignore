@@ -29,7 +29,9 @@ Thumbs.db
 .coverage
 coverage.xml
 htmlcov/
+.pytest_cache/
 pytest_cache/
+test-results/
 
 NUL
 

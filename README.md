@@ -27,3 +27,20 @@ containers in the `radio` pod.
 Manual admin queue uses Liquidsoap `request.queue`; downloads still use `yt-dlp`.
 
 Runtime details: [docs/runtime.md](docs/runtime.md).
+
+## Local CI
+
+GitHub CI can be reproduced locally from PowerShell:
+
+```powershell
+.\scripts\ci-local.ps1
+```
+
+Useful shorter runs:
+
+```powershell
+.\scripts\ci-local.ps1 -PythonOnly
+.\scripts\ci-local.ps1 -MetaOnly
+.\scripts\ci-local.ps1 -PostgresOnly
+.\scripts\ci-local.ps1 -SkipPostgres
+```
