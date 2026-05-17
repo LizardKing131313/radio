@@ -192,6 +192,102 @@ def test_queue_skip_endpoint_liquidsoap_error(
     assert response.status_code == 503
 
 
+def test_track_play_now_pushes_direct_request(
+    api_context: tuple[TestClient, Database],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, database = api_context
+    audio = tmp_path / "track.opus"
+    audio.write_text("audio", encoding="utf-8")
+    tracks = TracksRepo(database)
+    track_id = tracks.upsert("youtube0001", "Track", 120, audio_path=str(audio))
+    queue = QueueRepo(database)
+    queued_id = queue.enqueue(track_id)
+    queue.reserve_next()
+    calls: list[str] = []
+
+    class FakeTelnet:
+        def flush_request_queue(self) -> str:
+            calls.append("flush")
+            return "Done"
+
+        def push_request(self, uri: str) -> str:
+            calls.append(f"push:{uri}")
+            return "Queued"
+
+        def skip_output(self) -> str:
+            calls.append("skip")
+            return "Done"
+
+    api_module = import_module("manager.api.app")
+    monkeypatch.setattr(api_module, "LiquidsoapTelnetClient", FakeTelnet)
+
+    response = client.post(
+        f"/tracks/{track_id}/play-now",
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    normalized = str(audio).replace("\\", "/")
+    assert response.status_code == 200
+    assert response.json()["status"] == "playing"
+    assert response.json()["skipped_queue_items"] == 1
+    assert calls == ["flush", f'push:annotate:track_id="{track_id}":{normalized}', "skip"]
+    assert QueueRepo(database).history(limit=1)[0][0].id == queued_id
+    assert TracksRepo(database).get(track_id).play_count == 1
+
+
+def test_track_play_now_rejects_unplayable_tracks(
+    api_context: tuple[TestClient, Database],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, database = api_context
+    headers = {"Authorization": "Bearer secret-token"}
+    tracks = TracksRepo(database)
+    audio = tmp_path / "track.opus"
+    audio.write_text("audio", encoding="utf-8")
+    no_audio_id = tracks.upsert("youtube0001", "No Audio", 120)
+    missing_file_id = tracks.upsert(
+        "youtube0002",
+        "Missing File",
+        120,
+        audio_path=str(tmp_path / "missing.opus"),
+    )
+    inactive_id = tracks.upsert(
+        "youtube0003",
+        "Inactive",
+        120,
+        audio_path=str(audio),
+        is_active=0,
+    )
+    deleted_id = tracks.upsert("youtube0004", "Deleted", 120, audio_path=str(audio))
+    tracks.ban(deleted_id)
+
+    assert client.post(f"/tracks/{deleted_id}/play-now", headers=headers).status_code == 409
+    assert client.post(f"/tracks/{inactive_id}/play-now", headers=headers).status_code == 409
+    assert client.post(f"/tracks/{no_audio_id}/play-now", headers=headers).status_code == 409
+    assert client.post(f"/tracks/{missing_file_id}/play-now", headers=headers).status_code == 409
+
+    class BrokenTelnet:
+        def flush_request_queue(self) -> str:
+            from manager.playback.telnet import LiquidsoapTelnetError
+
+            raise LiquidsoapTelnetError("down")
+
+        def push_request(self, uri: str) -> str:
+            return "unused"
+
+        def skip_output(self) -> str:
+            return "unused"
+
+    api_module = import_module("manager.api.app")
+    monkeypatch.setattr(api_module, "LiquidsoapTelnetClient", BrokenTelnet)
+    playable_id = tracks.upsert("youtube0005", "Playable", 120, audio_path=str(audio))
+
+    assert client.post(f"/tracks/{playable_id}/play-now", headers=headers).status_code == 503
+
+
 def test_track_admin_page_and_actions(
     api_context: tuple[TestClient, Database],
     tmp_path: Path,
@@ -222,6 +318,8 @@ def test_track_admin_page_and_actions(
     assert 'id="queueItems"' in admin_html
     assert 'id="historyItems"' in admin_html
     assert "formatYoutube" in admin_html
+    assert "playNow" in admin_html
+    assert "Введите admin token" in admin_html
     tracks_response = client.get("/tracks?status=downloaded&q=track").json()
     assert tracks_response["items"][0]["id"] == track_id
     assert tracks_response["stats"]["downloaded"] == 1

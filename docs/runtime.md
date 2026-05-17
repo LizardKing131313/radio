@@ -41,7 +41,9 @@ search -> PostgreSQL -> prefetch -> cache PVC -> Liquidsoap -> FIFO -> FFmpeg ->
    токеном из `RADIO_ADMIN_TOKEN`. `/current` читает фактический
    `nowplaying.txt(.kv)` от Liquidsoap и отдает расчетный HLS offset,
    `/health` показывает состояние YouTube API quota/errors, `/metrics` отдает
-   компактный JSON по трекам, очереди, текущему эфиру и YouTube API.
+   компактный JSON по трекам, очереди, текущему эфиру и YouTube API. Кнопка
+   админки `Сейчас` вызывает `/tracks/{id}/play-now`: трек пушится напрямую в
+   Liquidsoap и не создает строку в ручной очереди.
 8. `nginx` отдает HLS из общего `emptyDir` volume и проксирует `/api/` в
    FastAPI-контейнер.
 9. `postgres-backup` CronJob раз в сутки делает `pg_dump -Fc` в

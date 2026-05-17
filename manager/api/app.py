@@ -63,6 +63,7 @@ ADMIN_HTML = """<!doctype html>
     .status { display: flex; flex-wrap: wrap; gap: 12px; }
     .actions { display: flex; flex-wrap: wrap; gap: 6px; }
     .error { background: #fff4ed; border-color: #ffb088; color: #7a271a; }
+    .notice { background: #ecfdf3; border-color: #73d19b; color: #074d31; }
     .empty { color: #667085; padding: 18px 8px; }
     @media (max-width: 760px) {
       header, .toolbar { align-items: stretch; flex-direction: column; }
@@ -92,6 +93,7 @@ ADMIN_HTML = """<!doctype html>
       <button id="skip" class="danger">Пропустить</button>
     </section>
     <section id="error" class="error" hidden></section>
+    <section id="notice" class="notice" hidden></section>
     <section>
       <h2>Очередь эфира</h2>
       <table>
@@ -129,12 +131,11 @@ ADMIN_HTML = """<!doctype html>
   <script>
     const api = location.pathname.startsWith('/api/') ? '/api' : '';
     const el = id => document.getElementById(id);
-    const auth = () => ({'Authorization': 'Bearer ' + localStorage.radioAdminToken});
     el('token').value = localStorage.radioAdminToken || '';
     el('saveToken').onclick = () => { localStorage.radioAdminToken = el('token').value; load(); };
     el('refresh').onclick = () => load();
     el('search').onclick = () => loadTracks();
-    el('skip').onclick = () => skipCurrent();
+    el('skip').onclick = () => skipCurrent(el('skip'));
     el('query').onkeydown = event => { if (event.key === 'Enter') loadTracks(); };
     async function json(url, options = {}) {
       const response = await fetch(api + url, options);
@@ -143,6 +144,7 @@ ADMIN_HTML = """<!doctype html>
     }
     async function load() {
       clearError();
+      clearNotice();
       const [currentResult, metricsResult] = await Promise.allSettled([json('/current'), json('/metrics')]);
       if (currentResult.status === 'fulfilled') {
         const src = currentResult.value.now_playing && currentResult.value.now_playing.source;
@@ -193,32 +195,69 @@ ADMIN_HTML = """<!doctype html>
         <td data-label="Трек"><b>${title}</b><br><span class="muted">${channel}</span></td>
         <td data-label="Состояние">${state}<br><span class="muted">${track.duration_sec}s</span></td>
         <td data-label="Действия" class="actions">
-          <button onclick="enqueue(${track.id})">В очередь</button>
-          <button onclick="retryTrack(${track.id})">Перекачать</button>
-          ${track.deleted_at ? `<button onclick="restoreTrack(${track.id})">Вернуть</button>` : `<button class="danger" onclick="banTrack(${track.id})">Бан</button>`}
+          <button onclick="enqueue(${track.id}, this)">В очередь</button>
+          <button class="primary" onclick="playNow(${track.id}, this)">Сейчас</button>
+          <button onclick="retryTrack(${track.id}, this)">Перекачать</button>
+          ${track.deleted_at ? `<button onclick="restoreTrack(${track.id}, this)">Вернуть</button>` : `<button class="danger" onclick="banTrack(${track.id}, this)">Бан</button>`}
           <a href="${url}" target="_blank" rel="noreferrer"><button>YT</button></a>
         </td>
       </tr>`;
     }
-    async function enqueue(trackId) {
-      await json('/queue/append/admin', {method: 'POST', headers: {'Content-Type': 'application/json', ...auth()}, body: JSON.stringify({track_id: trackId})});
-      await load();
+    async function enqueue(trackId, button) {
+      await runAction(button, 'Добавлено в очередь', async () => {
+        await json('/queue/append/admin', {method: 'POST', headers: authJson(), body: JSON.stringify({track_id: trackId})});
+      });
     }
-    async function skipCurrent() {
-      await json('/queue/skip', {method: 'POST', headers: auth()});
-      await load();
+    async function playNow(trackId, button) {
+      await runAction(button, 'Запущено сейчас', async () => {
+        await json(`/tracks/${trackId}/play-now`, {method: 'POST', headers: auth()});
+      });
     }
-    async function banTrack(trackId) {
-      await json(`/tracks/${trackId}/ban`, {method: 'POST', headers: auth()});
-      await loadTracks();
+    async function skipCurrent(button) {
+      await runAction(button, 'Текущий эфир пропущен', async () => {
+        await json('/queue/skip', {method: 'POST', headers: auth()});
+      });
     }
-    async function restoreTrack(trackId) {
-      await json(`/tracks/${trackId}/restore`, {method: 'POST', headers: auth()});
-      await loadTracks();
+    async function banTrack(trackId, button) {
+      await runAction(button, 'Трек забанен', async () => {
+        await json(`/tracks/${trackId}/ban`, {method: 'POST', headers: auth()});
+      });
     }
-    async function retryTrack(trackId) {
-      await json(`/tracks/${trackId}/retry`, {method: 'POST', headers: auth()});
-      await loadTracks();
+    async function restoreTrack(trackId, button) {
+      await runAction(button, 'Трек возвращен', async () => {
+        await json(`/tracks/${trackId}/restore`, {method: 'POST', headers: auth()});
+      });
+    }
+    async function retryTrack(trackId, button) {
+      await runAction(button, 'Скачивание запланировано заново', async () => {
+        await json(`/tracks/${trackId}/retry`, {method: 'POST', headers: auth()});
+      });
+    }
+    async function runAction(button, message, task) {
+      try {
+        clearError();
+        clearNotice();
+        setBusy(button, true);
+        await task();
+        await load();
+        setNotice(message);
+      } catch (error) {
+        setError(error);
+      } finally {
+        setBusy(button, false);
+      }
+    }
+    function authJson() {
+      return {'Content-Type': 'application/json', ...auth()};
+    }
+    function setBusy(button, busy) {
+      if (button) button.disabled = busy;
+    }
+    function requireToken() {
+      const token = (el('token').value || localStorage.radioAdminToken || '').trim();
+      if (!token) throw new Error('Введите admin token');
+      localStorage.radioAdminToken = token;
+      return token;
     }
     function escapeHtml(value) {
       return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;', "'":'&#39;'}[ch]));
@@ -247,6 +286,7 @@ ADMIN_HTML = """<!doctype html>
       return `${status}; ошибок подряд: ${errors}; units: ${units}`;
     }
     function escapeAttr(value) { return escapeHtml(value).replace(/`/g, '&#96;'); }
+    function auth() { return {'Authorization': 'Bearer ' + requireToken()}; }
     function setError(error) {
       const box = el('error');
       box.hidden = false;
@@ -254,6 +294,16 @@ ADMIN_HTML = """<!doctype html>
     }
     function clearError() {
       const box = el('error');
+      box.hidden = true;
+      box.textContent = '';
+    }
+    function setNotice(message) {
+      const box = el('notice');
+      box.hidden = false;
+      box.textContent = message;
+    }
+    function clearNotice() {
+      const box = el('notice');
       box.hidden = true;
       box.textContent = '';
     }
@@ -460,6 +510,34 @@ def track_retry(track_id: int, database: DatabaseDep) -> dict[str, object]:
     return {"status": "scheduled", "track": dict(repo.retry_download(track_id).to_dict())}
 
 
+@app.post("/tracks/{track_id}/play-now", dependencies=[Depends(require_admin_token)])
+def track_play_now(track_id: int, database: DatabaseDep) -> dict[str, object]:
+    tracks_repo = TracksRepo(database)
+    queue_repo = QueueRepo(database)
+    track = _get_track_or_404(tracks_repo, track_id)
+    path = _playable_audio_path(track)
+    client = LiquidsoapTelnetClient()
+    try:
+        # "Играть сейчас" не создает queue_items. Сначала чистим уже отправленные
+        # request.queue items, потом кладем прямой request и скипаем текущий output.
+        client.flush_request_queue()
+        client.push_request(_direct_play_uri(track, path))
+        client.skip_output()
+    except LiquidsoapTelnetError as exception:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"liquidsoap command failed: {exception}",
+        ) from exception
+
+    skipped_queue_items = queue_repo.skip_current()
+    tracks_repo.touch_play(track.id)
+    return {
+        "status": "playing",
+        "skipped_queue_items": skipped_queue_items,
+        "track": dict(tracks_repo.get(track.id).to_dict()),
+    }
+
+
 @app.post("/queue/append", dependencies=[Depends(require_admin_token)])
 def queue_append(
     payload: EnqueueRequest,
@@ -596,3 +674,33 @@ def _is_under_any(path: FsPath, roots: tuple[FsPath, FsPath]) -> bool:
 def _unlink_if_exists(path: FsPath) -> None:
     with suppress(OSError):
         path.unlink(missing_ok=True)
+
+
+def _playable_audio_path(track: Track) -> FsPath:
+    if track.deleted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="track is deleted",
+        )
+    if not track.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="track is inactive",
+        )
+    if not track.audio_path:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="track is not downloaded",
+        )
+    path = FsPath(track.audio_path)
+    if not path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="track audio file is missing",
+        )
+    return path
+
+
+def _direct_play_uri(track: Track, path: FsPath) -> str:
+    normalized = str(path).replace("\\", "/")
+    return f'annotate:track_id="{track.id}":{normalized}'
