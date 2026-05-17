@@ -4,11 +4,19 @@
 #
 #    pip-compile --extra=dev --output-file=requirements-dev.txt pyproject.toml
 #
+alembic==1.18.4
+    # via radio_manager (pyproject.toml)
+annotated-doc==0.0.4
+    # via fastapi
 annotated-types==0.7.0
     # via pydantic
 anybadge==1.16.0
     # via radio_manager (pyproject.toml)
-black==25.1.0
+anyio==4.13.0
+    # via
+    #   httpx
+    #   starlette
+black==25.12.0
     # via radio_manager (pyproject.toml)
 boolean-py==5.0
     # via license-expression
@@ -17,7 +25,10 @@ cachecontrol[filecache]==0.14.3
     #   cachecontrol
     #   pip-audit
 certifi==2025.8.3
-    # via requests
+    # via
+    #   httpcore
+    #   httpx
+    #   requests
 cfgv==3.4.0
     # via pre-commit
 charset-normalizer==3.4.3
@@ -25,12 +36,12 @@ charset-normalizer==3.4.3
 click==8.2.1
     # via
     #   black
-    #   typer
+    #   uvicorn
 colorama==0.4.6
     # via
     #   click
     #   pytest
-coverage[toml]==7.10.5
+coverage[toml]==7.14.0
     # via
     #   pytest-cov
     #   radio_manager (pyproject.toml)
@@ -40,29 +51,46 @@ defusedxml==0.7.1
     # via py-serializable
 distlib==0.4.0
     # via virtualenv
+fastapi==0.128.1
+    # via radio_manager (pyproject.toml)
 filelock==3.19.1
     # via
     #   cachecontrol
     #   virtualenv
+greenlet==3.5.0
+    # via sqlalchemy
+h11==0.16.0
+    # via
+    #   httpcore
+    #   uvicorn
+httpcore==1.0.9
+    # via httpx
+httpx==0.28.1
+    # via radio_manager (pyproject.toml)
 identify==2.6.13
     # via pre-commit
 idna==3.10
-    # via requests
+    # via
+    #   anyio
+    #   httpx
+    #   requests
 iniconfig==2.1.0
     # via pytest
-jinja2==3.1.6
-    # via radio_manager (pyproject.toml)
+librt==0.11.0
+    # via mypy
 license-expression==30.4.4
     # via cyclonedx-python-lib
+mako==1.3.12
+    # via alembic
 markdown-it-py==4.0.0
     # via rich
-markupsafe==3.0.2
-    # via jinja2
+markupsafe==3.0.3
+    # via mako
 mdurl==0.1.2
     # via markdown-it-py
 msgpack==1.1.1
     # via cachecontrol
-mypy==1.17.1
+mypy==1.19.1
     # via radio_manager (pyproject.toml)
 mypy-extensions==1.1.0
     # via
@@ -100,15 +128,20 @@ pluggy==1.6.0
     #   pytest-cov
 pre-commit==4.3.0
     # via radio_manager (pyproject.toml)
+psycopg[binary]==3.3.4
+    # via radio_manager (pyproject.toml)
+psycopg-binary==3.3.4
+    # via psycopg
 py-serializable==2.1.0
     # via cyclonedx-python-lib
-pydantic==2.11.7
+pydantic==2.11.10
     # via
+    #   fastapi
     #   pydantic-settings
     #   radio_manager (pyproject.toml)
 pydantic-core==2.33.2
     # via pydantic
-pydantic-settings==2.10.1
+pydantic-settings==2.14.1
     # via radio_manager (pyproject.toml)
 pygments==2.19.2
     # via
@@ -116,21 +149,20 @@ pygments==2.19.2
     #   rich
 pyparsing==3.2.3
     # via pip-requirements-parser
-pytest==8.4.1
+pytest==9.0.3
     # via
     #   pytest-asyncio
-    #   pytest-builtin-types
     #   pytest-cov
     #   radio_manager (pyproject.toml)
-pytest-asyncio==1.1.0
+pytest-asyncio==1.3.0
     # via radio_manager (pyproject.toml)
-pytest-builtin-types==1.2
-    # via radio_manager (pyproject.toml)
-pytest-cov==6.2.1
+pytest-cov==7.1.0
     # via radio_manager (pyproject.toml)
 python-dotenv==1.1.1
     # via pydantic-settings
-pyyaml==6.0.2
+pytokens==0.4.1
+    # via black
+pyyaml==6.0.3
     # via
     #   pre-commit
     #   radio_manager (pyproject.toml)
@@ -139,40 +171,46 @@ requests==2.32.5
     #   cachecontrol
     #   pip-audit
 rich==14.1.0
-    # via
-    #   pip-audit
-    #   typer
-ruff==0.12.11
+    # via pip-audit
+ruff==0.15.13
     # via radio_manager (pyproject.toml)
-shellingham==1.5.4
-    # via typer
 sortedcontainers==2.4.0
     # via cyclonedx-python-lib
+sqlalchemy==2.0.49
+    # via
+    #   alembic
+    #   radio_manager (pyproject.toml)
+starlette==0.50.0
+    # via fastapi
 structlog==25.4.0
     # via radio_manager (pyproject.toml)
 toml==0.10.2
     # via pip-audit
-typer==0.16.1
-    # via radio_manager (pyproject.toml)
-types-pyyaml==6.0.12.20250822
-    # via radio_manager (pyproject.toml)
-types-requests==2.32.4.20250809
+types-pyyaml==6.0.12.20260510
     # via radio_manager (pyproject.toml)
 typing-extensions==4.15.0
     # via
+    #   alembic
+    #   anyio
+    #   fastapi
     #   mypy
+    #   psycopg
     #   pydantic
     #   pydantic-core
-    #   typer
+    #   pytest-asyncio
+    #   sqlalchemy
+    #   starlette
     #   typing-inspection
 typing-inspection==0.4.1
     # via
     #   pydantic
     #   pydantic-settings
+tzdata==2026.2
+    # via psycopg
 urllib3==2.5.0
-    # via
-    #   requests
-    #   types-requests
+    # via requests
+uvicorn==0.47.0
+    # via radio_manager (pyproject.toml)
 virtualenv==20.34.0
     # via pre-commit
 yt-dlp==2025.8.27

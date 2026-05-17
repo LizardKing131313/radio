@@ -5,15 +5,15 @@ import subprocess
 
 def main() -> int:
     """
-    Amend the last commit with the updated coverage
+    Дописать обновленный coverage badge в последний commit.
     """
-    # Check if the coverage badge has changed
+    # Проверяем, изменился ли сгенерированный бейдж покрытия.
     diff = subprocess.run(["git", "diff", "--quiet", "--", "badges/coverage.svg"])
-    # If the coverage badge has changed, amend the last commit with the updated coverage badge
+    # Если бейдж изменился, добавляем его в последний commit без смены сообщения.
     if diff.returncode != 0:
         subprocess.run(["git", "add", "badges/coverage.svg"], check=True)
         subprocess.run(["git", "commit", "--amend", "--no-edit"], check=False)
-    # Return success code
+    # Скрипт используется как best-effort helper и всегда завершает CI успешно.
     return 0
 
 

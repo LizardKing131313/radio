@@ -7,6 +7,7 @@ from pathlib import Path
 
 
 def iterate_files(dir_path: Path) -> Iterable[Path]:
+    # Отсутствующая директория для кеша считается пустой, это упрощает init.
     if not dir_path.exists():
         return []
     return (path for path in dir_path.iterdir() if path.is_file())
@@ -17,6 +18,7 @@ def watch_url(youtube_id: str) -> str:
 
 
 async def proc_exec(*args: str, timeout: int | None = None) -> tuple[int, str, str]:
+    # Единая тонкая обертка для внешних бинарников: yt-dlp и ffmpeg.
     proc = await asyncio.create_subprocess_exec(
         *args,
         stdout=asyncio.subprocess.PIPE,
@@ -36,6 +38,8 @@ async def proc_exec(*args: str, timeout: int | None = None) -> tuple[int, str, s
 
 
 class SuppressTask:
+    # Используется в best-effort cleanup: ошибка удаления файла не должна
+    # ронять весь prefetch tick.
     def __enter__(self) -> SuppressTask:
         return self
 

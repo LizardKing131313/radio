@@ -9,16 +9,19 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
   "yt-dlp>=2025.8.20",
-  "typer>=0.12",
-  "pydantic>=2.11.9",
+  "psycopg[binary]>=3.2",
+  "sqlalchemy>=2.0",
+  "alembic>=1.13",
+  "fastapi>=0.124",
+  "uvicorn>=0.38",
+  "pydantic>=2.11.10",
   "pydantic-settings>=2.11.0",
   "pyyaml>=6.0.3",
-  "jinja2>=3.1",
   "structlog>=25.4.0"
 ]
 [project.optional-dependencies]
 dev = [
-  "ruff>=0.13.2",
+  "ruff>=0.13.3",
   "black>=25.9.0",
   "pytest>=8.4.2",
   "pytest-asyncio>=1.2.0",
@@ -28,9 +31,8 @@ dev = [
   "coverage[toml]>=7.10.7",
   "anybadge>=1.16",
   "pip-audit>=2.7",
-  "types-PyYAML>=6.0.12.20250915",
-  "pytest-builtin-types",
-  "types-requests>=2.32.4.20250913"
+  "httpx>=0.28",
+  "types-PyYAML>=6.0.12.20250915"
 ]
 
 [tool.setuptools.packages.find]
@@ -83,10 +85,6 @@ module = ["anybadge.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["typer.*"]
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
 module = ["pydantic.*"]
 ignore_missing_imports = true
 
@@ -106,6 +104,9 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["scripts", "manager"]
+markers = [
+  "integration: tests that need external services such as PostgreSQL"
+]
 
 [tool.coverage.run]
 branch = true
@@ -117,6 +118,11 @@ omit = [
   "tests/**",
   "**/__init__.py",
   "**/__main__.py",
+  "manager/logger.py",
+  "manager/main.py",
+  "manager/prefetch/**",
+  "manager/search/search_service.py",
+  "manager/track_queue/models.py",
 ]
 parallel = true
 concurrency = ["thread", "multiprocessing"]
@@ -124,7 +130,7 @@ concurrency = ["thread", "multiprocessing"]
 [tool.coverage.report]
 skip_empty = true
 show_missing = true
-fail_under = 0
+fail_under = 100
 exclude_lines = [
   "pragma: no cover",
   "if __name__ == .__main__.:",

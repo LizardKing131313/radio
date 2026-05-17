@@ -1,0 +1,227 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: radio
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: radio
+  ports:
+    - name: http
+      port: 80
+      targetPort: nginx
+      # Локальный Docker Desktop открывает NodePort на 127.0.0.1:30080.
+      nodePort: 30080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: radio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: radio
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: radio
+    spec:
+      initContainers:
+        # Контейнеры приложения не должны стартовать раньше Postgres.
+        - name: wait-postgres
+          image: postgres:16-alpine
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: radio-secrets
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: radio-secrets
+                  key: POSTGRES_USER
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              until pg_isready -h postgres -U "${POSTGRES_USER}" -d "${POSTGRES_DB}"; do
+                sleep 2
+              done
+        # Runtime-директории и FIFO живут внутри pod. Аудиокеш хранится на PVC,
+        # HLS-файлы можно потерять и пересоздать.
+        - name: prepare-runtime
+          image: busybox:1.36
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              mkdir -p \
+                /opt/radio/cache/cold \
+                /opt/radio/cache/hot \
+                /opt/radio/cache/blacklist \
+                /opt/radio/runtime/fifo \
+                /opt/radio/runtime/info \
+                /opt/radio/www/hls/ts \
+                /opt/radio/www/hls/mp4
+              rm -f /opt/radio/runtime/fifo/radio.wav
+              mkfifo /opt/radio/runtime/fifo/radio.wav
+          volumeMounts:
+            - name: radio-cache
+              mountPath: /opt/radio/cache
+            - name: radio-runtime
+              mountPath: /opt/radio/runtime
+            - name: radio-www
+              mountPath: /opt/radio/www
+      containers:
+        # Search - обычный worker: YouTube Data API -> Postgres.
+        - name: search
+          image: radio-manager:latest
+          imagePullPolicy: IfNotPresent
+          command: [ "python", "-m", "manager", "search" ]
+          envFrom:
+            - secretRef:
+                name: radio-secrets
+          volumeMounts:
+            - name: radio-config
+              mountPath: /opt/radio/data
+            - name: radio-runtime
+              mountPath: /opt/radio/runtime
+          readinessProbe:
+            exec:
+              command: [ "python", "-m", "manager", "db-check" ]
+            initialDelaySeconds: 10
+            periodSeconds: 30
+        # Prefetch - единственный контейнер, где запускается yt-dlp.
+        - name: prefetch
+          image: radio-manager:latest
+          imagePullPolicy: IfNotPresent
+          command: [ "python", "-m", "manager", "prefetch" ]
+          envFrom:
+            - secretRef:
+                name: radio-secrets
+          volumeMounts:
+            - name: radio-config
+              mountPath: /opt/radio/data
+            - name: radio-cache
+              mountPath: /opt/radio/cache
+          readinessProbe:
+            exec:
+              command: [ "python", "-m", "manager", "db-check" ]
+            initialDelaySeconds: 10
+            periodSeconds: 30
+        # Queue player - мост между Postgres queue_items и Liquidsoap request.queue.
+        # Он не запускает аудиопроцессы, только отправляет request_queue.push.
+        - name: queue-player
+          image: radio-manager:latest
+          imagePullPolicy: IfNotPresent
+          command: [ "python", "-m", "manager", "queue-player" ]
+          envFrom:
+            - secretRef:
+                name: radio-secrets
+          volumeMounts:
+            - name: radio-config
+              mountPath: /opt/radio/data
+            - name: radio-cache
+              mountPath: /opt/radio/cache
+            - name: radio-runtime
+              mountPath: /opt/radio/runtime
+          readinessProbe:
+            exec:
+              command: [ "python", "-m", "manager", "db-check" ]
+            initialDelaySeconds: 10
+            periodSeconds: 30
+        # API - тонкая HTTP-обертка над репозиториями, без управления процессами.
+        - name: api
+          image: radio-manager:latest
+          imagePullPolicy: IfNotPresent
+          command: [ "uvicorn", "manager.api:app", "--host", "0.0.0.0", "--port", "8000" ]
+          envFrom:
+            - secretRef:
+                name: radio-secrets
+          ports:
+            - name: api
+              containerPort: 8000
+          volumeMounts:
+            - name: radio-config
+              mountPath: /opt/radio/data
+            - name: radio-runtime
+              mountPath: /opt/radio/runtime
+            - name: radio-cache
+              mountPath: /opt/radio/cache
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: api
+            initialDelaySeconds: 10
+            periodSeconds: 30
+        # Liquidsoap читает hot/cold cache и пишет WAV в общий FIFO.
+        - name: liquidsoap
+          image: radio-manager:latest
+          imagePullPolicy: IfNotPresent
+          command: [ "liquidsoap", "-v", "/opt/radio/data/radio.liq" ]
+          volumeMounts:
+            - name: radio-config
+              mountPath: /opt/radio/data
+            - name: radio-cache
+              mountPath: /opt/radio/cache
+            - name: radio-runtime
+              mountPath: /opt/radio/runtime
+        # Python только собирает args, затем exec-ом заменяется на ffmpeg.
+        - name: ffmpeg
+          image: radio-manager:latest
+          imagePullPolicy: IfNotPresent
+          command: [ "python", "-m", "manager", "ffmpeg-hls" ]
+          volumeMounts:
+            - name: radio-config
+              mountPath: /opt/radio/data
+            - name: radio-runtime
+              mountPath: /opt/radio/runtime
+            - name: radio-www
+              mountPath: /opt/radio/www
+        # Nginx отдает HLS из общего emptyDir и проксирует /api/.
+        # Наружу его публикует Service radio через NodePort 30080.
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - name: nginx
+              containerPort: 8080
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+            - name: radio-www
+              mountPath: /opt/radio/www
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: nginx
+            initialDelaySeconds: 3
+            periodSeconds: 10
+      volumes:
+        # ConfigMap хранит только несекретный статический конфиг.
+        - name: radio-config
+          configMap:
+            name: radio-config
+        - name: nginx-config
+          configMap:
+            name: nginx-config
+        - name: radio-runtime
+          emptyDir: { }
+        - name: radio-www
+          emptyDir: { }
+        - name: radio-cache
+          persistentVolumeClaim:
+            claimName: radio-cache
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: radio-cache
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi

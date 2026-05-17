@@ -11,13 +11,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class MissingConfigError(RuntimeError):
-    """Raised on the first access to a critical config value when it is missing."""
+    """Ошибка ленивой проверки: критичный параметр запросили, но его нет."""
 
 
 class Paths(BaseModel):
     base: Path = Field(default=Path("/opt/radio"))
     data: Path = Field(default=Path("/opt/radio/data"))
-    data_base: Path = Field(default=Path("/opt/radio/data/radio.sqlite"))
     cookies: Path = Field(default=Path("/opt/radio/data/cookies.txt"))
     cache_cold: Path = Field(default=Path("/opt/radio/cache/cold"))
     cache_hot: Path = Field(default=Path("/opt/radio/cache/hot"))
@@ -26,24 +25,14 @@ class Paths(BaseModel):
     runtime_info_dir: Path = Field(default=Path("/opt/radio/runtime/info"))
     fifo_audio_path: Path = Field(default=Path("/opt/radio/runtime/fifo/radio.wav"))
     nowplaying_path: Path = Field(default=Path("/opt/radio/runtime/info/nowplaying.txt"))
+    youtube_telemetry_path: Path = Field(default=Path("/opt/radio/runtime/info/youtube_api.json"))
     www_hls_ts: Path = Field(default=Path("/opt/radio/www/hls/ts"))
     www_hls_mp4: Path = Field(default=Path("/opt/radio/www/hls/mp4"))
     www_html: Path = Field(default=Path("/opt/radio/www/html"))
 
 
-class LiquidSoapSettings(BaseModel):
-    telnet_host: str = Field(default="127.0.0.1")
-    telnet_port: int = Field(default=1234)
-    restart_timer_max_sec: int = Field(default=5)
-    connect_timeout_sec: float = Field(default=5.0)
-    command_timeout_sec: float = Field(default=5.0)
-    per_line_timeout_sec: float = Field(default=0.2)
-    max_lines: int = Field(default=1000)
-    max_total_bytes: int = Field(default=256 * 1024)
-
-
 class HLSSettings(BaseModel):
-    """HLS knobs kept close to ffmpeg flags for easier mapping."""
+    """Настройки HLS названы почти как ffmpeg-флаги, чтобы проще сверять CLI."""
 
     hls_time: int = Field(default=6)
     hls_list_size: int = Field(default=12)
@@ -53,11 +42,10 @@ class HLSSettings(BaseModel):
 
 class SearchSettings(BaseModel):
     title: str = Field(default="говновоз")
-    interval_sec: int = Field(default=5)  # pause between ticks
-    lru_capacity: int = Field(default=50_000)  # remember last N ids
-    window_size: int = Field(default=200)  # results per search "window"
-    max_windows_per_tick: int = Field(default=15)  # during full crawl
-    early_stop_new: int = Field(default=20)  # stop tick after K new items (incremental)
+    interval_sec: int = Field(default=3600)
+    window_size: int = Field(default=25)
+    max_windows_per_tick: int = Field(default=1)
+    quota_backoff_sec: int = Field(default=21600)
 
 
 class PrefetchSetting(BaseModel):
@@ -66,25 +54,40 @@ class PrefetchSetting(BaseModel):
     hot_max_items: int = Field(default=5)
     batch_size: int = Field(default=100)
     download_timeout_sec: int = Field(default=600)
-    hot_ttl_minutes: int = Field(default=30)
     concurrent_downloads: int = Field(default=4)
 
 
-class CoordinatorSetting(BaseModel):
-    interval_sec: int = Field(default=3)
-    hot_window_size: int = Field(default=3)
+class DatabaseSettings(BaseModel):
+    """
+    Настройки подключения к PostgreSQL.
+
+    DDL принадлежит Alembic. Приложение только проверяет, что миграции уже
+    применены, и после этого выполняет запросы репозиториев.
+    """
+
+    dsn_raw: SecretStr | None = Field(default=None)
+    connect_timeout_sec: int = Field(default=5)
+    application_name: str = Field(default="radio-manager")
+
+    @property
+    def dsn(self) -> SecretStr:
+        if self.dsn_raw is None:
+            raise MissingConfigError(
+                "Missing PostgreSQL DSN. Set RADIO_DATABASE_DSN or DATABASE_URL."
+            )
+        return self.dsn_raw
 
 
 class Secrets(BaseModel):
     """
-    Holds secrets; values are optional at construction time and validated lazily on access.
-    Filled from env explicitly in AppConfig.from_yaml().
+    Секреты заполняются из env поверх YAML.
+
+    Поля опциональны при создании конфига, а падают только при первом реальном
+    доступе. Так тесты и команды без YouTube API key не ломаются на импорте.
     """
 
     youtube_api_key_raw: SecretStr | None = Field(default=None)
-    youtube_stream_key_raw: SecretStr | None = Field(default=None)
-    rtmp_enabled: bool = Field(default=False)
-    rtmp_ingest_url: str = Field(default="rtmp://a.rtmp.youtube.com/live2")
+    admin_token_raw: SecretStr | None = Field(default=None)
 
     @property
     def youtube_api_key(self) -> SecretStr:
@@ -95,58 +98,44 @@ class Secrets(BaseModel):
         return self.youtube_api_key_raw
 
     @property
-    def youtube_stream_key(self) -> SecretStr:
-        if self.youtube_stream_key_raw is None:
-            raise MissingConfigError(
-                "Missing YouTube RTMP stream key. Set RADIO_YOUTUBE_STREAM_KEY / "
-                "YT_STREAM_KEY or YOUTUBE_STREAM_KEY."
-            )
-        return self.youtube_stream_key_raw
-
-    @property
-    def youtube_stream_url(self) -> str:
-        if not self.rtmp_enabled:
-            raise MissingConfigError(
-                "YouTube RTMP is disabled (RADIO_YOUTUBE_RTMP_ENABLED=false). "
-                "Enable it to build stream URL."
-            )
-        key = self.youtube_stream_key  # lazy failure if missing
-        return f"{self.rtmp_ingest_url.rstrip('/')}/{key.get_secret_value()}"
+    def admin_token(self) -> SecretStr:
+        if self.admin_token_raw is None:
+            raise MissingConfigError("Missing admin token. Set RADIO_ADMIN_TOKEN or ADMIN_TOKEN.")
+        return self.admin_token_raw
 
 
 class AppConfig(BaseSettings):
     """
-    Main application settings.
+    Главный слой настроек приложения.
 
-    Source of truth:
-      1) YAML file (structured config)
-      2) Env overrides for secrets (flat RADIO_* or plain fallbacks),
-         merged explicitly in from_yaml().
+    Источники:
+      1) YAML-файл для структурного runtime config.
+      2) Env-переменные для секретов и DSN.
 
-    We do NOT parse HLS or bitrates from env to avoid flaky behavior.
+    HLS и bitrates не читаются из env, чтобы не плодить скрытые override-ы.
     """
 
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
-        env_prefix="",  # no automatic prefixing
-        env_nested_delimiter="__",  # reserved for future nested overrides
+        env_prefix="",  # автоматический env binding выключен
+        env_nested_delimiter="__",  # оставлено только как резерв для будущего
         extra="ignore",
         case_sensitive=False,
     )
 
     paths: Paths = Field(default_factory=Paths)
-    liquidsoap: LiquidSoapSettings = Field(default_factory=LiquidSoapSettings)
     hls: HLSSettings = Field(default_factory=HLSSettings)
     search: SearchSettings = Field(default_factory=SearchSettings)
     prefetch: PrefetchSetting = Field(default_factory=PrefetchSetting)
-    coordinator: CoordinatorSetting = Field(default_factory=CoordinatorSetting)
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     secrets: Secrets = Field(default_factory=Secrets)
 
-    # ---------- YAML loader with explicit env merge ----------
+    # YAML грузим явно, затем вручную накладываем env-секреты.
     @classmethod
     def from_yaml(cls, path: Path | None = None) -> AppConfig:
         """
-        Load config from YAML, then overlay flat env secrets.
-        Search order if path is not provided:
+        Загрузить YAML и поверх него наложить env.
+
+        Порядок поиска, если путь не передан:
           ./data/config.yaml
           /opt/radio/data/config.yaml
         """
@@ -168,7 +157,7 @@ class AppConfig(BaseSettings):
 
         cfg = cls.model_validate(raw)
 
-        # ---- explicit env merge (no pydantic alias magic) ----
+        # Никакой магии alias-ов: видимые имена env явно перечислены здесь.
         def _get_env(*names: str) -> str | None:
             for n in names:
                 v = os.getenv(n)
@@ -176,41 +165,32 @@ class AppConfig(BaseSettings):
                     return v
             return None
 
-        # API key
+        # Ключ нужен только search-воркеру, поэтому валидируется лениво.
         api_key = _get_env("RADIO_YOUTUBE_API_KEY", "YOUTUBE_API_KEY")
         if api_key is not None:
             cfg.secrets.youtube_api_key_raw = SecretStr(api_key)
 
-        # Stream key (support multiple common names)
-        stream_key = _get_env("RADIO_YOUTUBE_STREAM_KEY", "YT_STREAM_KEY", "YOUTUBE_STREAM_KEY")
-        if stream_key is not None:
-            cfg.secrets.youtube_stream_key_raw = SecretStr(stream_key)
+        admin_token = _get_env("RADIO_ADMIN_TOKEN", "ADMIN_TOKEN")
+        if admin_token is not None:
+            cfg.secrets.admin_token_raw = SecretStr(admin_token)
 
-        # RTMP enabled (truthy parser)
-        enabled_raw = _get_env("RADIO_YOUTUBE_RTMP_ENABLED", "YOUTUBE_RTMP_ENABLED")
-        if enabled_raw is not None:
-            truthy = {"1", "true", "yes", "on"}
-            cfg.secrets.rtmp_enabled = enabled_raw.strip().lower() in truthy
-
-        # RTMP ingest URL
-        ingest = _get_env("RADIO_YOUTUBE_RTMP_URL", "YOUTUBE_RTMP_URL")
-        if ingest is not None:
-            cfg.secrets.rtmp_ingest_url = ingest
+        database_dsn = _get_env("RADIO_DATABASE_DSN", "DATABASE_URL", "POSTGRES_DSN")
+        if database_dsn is not None:
+            cfg.database.dsn_raw = SecretStr(database_dsn)
 
         return cfg
 
 
 @cache
 def get_settings() -> AppConfig:
-    # Read from YAML by default; callers can still pass a path to from_yaml() directly if needed.
+    # Обычный runtime читает дефолтный YAML; тесты могут вызывать from_yaml(path).
     return AppConfig.from_yaml()
 
 
 __all__ = [
     "AppConfig",
-    "CoordinatorSetting",
+    "DatabaseSettings",
     "HLSSettings",
-    "LiquidSoapSettings",
     "MissingConfigError",
     "Paths",
     "PrefetchSetting",

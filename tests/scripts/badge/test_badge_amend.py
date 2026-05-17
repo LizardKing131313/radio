@@ -3,7 +3,6 @@ from unittest.mock import MagicMock, patch
 
 @patch("scripts.badge.badge_amend.subprocess.run")
 def test_badge_amend(mock_run: MagicMock) -> None:
-
     def side_effect(cmd: list[str], *_args: object, **_kwargs: object) -> MagicMock:
         if cmd[:3] == ["git", "diff", "--quiet"]:
             m = MagicMock()
@@ -28,7 +27,6 @@ def test_badge_amend(mock_run: MagicMock) -> None:
 
 @patch("scripts.badge.badge_amend.subprocess.run")
 def test_badge_not_amend(mock_run: MagicMock) -> None:
-
     def side_effect(cmd: list[str], *_args: object, **_kwargs: object) -> MagicMock:
         if cmd[:3] == ["git", "diff", "--quiet"]:
             m = MagicMock()

@@ -23,7 +23,5 @@ hls:
 # Secrets are intentionally left empty in YAML.
 # Provide them via environment variables:
 #   RADIO_YOUTUBE_API_KEY=...
-#   RADIO_YOUTUBE_STREAM_KEY=...  (or YT_STREAM_KEY / YOUTUBE_STREAM_KEY)
-#   RADIO_YOUTUBE_RTMP_ENABLED=true
-#   RADIO_YOUTUBE_RTMP_URL=rtmp://a.rtmp.youtube.com/live2
+#   RADIO_DATABASE_DSN=postgresql://radio:secret@postgres:5432/radio
 secrets: { }

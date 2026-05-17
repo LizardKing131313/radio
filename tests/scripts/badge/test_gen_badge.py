@@ -41,7 +41,7 @@ def _run_script_in(tmp_path: Path, coverage_xml: str | None) -> None:
         # chdir в песочницу
         __import__("os").chdir(tmp_path)
 
-        # подготовим optional coverage.xml
+        # coverage.xml создаем только для сценариев, где он нужен
         if coverage_xml is not None:
             (tmp_path / "coverage.xml").write_text(coverage_xml, encoding="utf-8")
 

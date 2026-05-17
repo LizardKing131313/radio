@@ -4,12 +4,11 @@ import xml.etree.ElementTree as elementTree
 import anybadge
 
 
-# File paths
+# Путь к SVG-бейджу покрытия.
 badge_file = pathlib.Path("badges/coverage.svg")
 badge_file.parent.mkdir(parents=True, exist_ok=True)
 
-# Parse the coverage.xml file to get the line-rate
-# If the file does not exist or is invalid, set coverage to 0.
+# Берем line-rate из coverage.xml. Если файла нет или XML битый, считаем 0%.
 coverage = 0.0
 try:
     coverage_xml = pathlib.Path("coverage.xml")

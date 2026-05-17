@@ -4,22 +4,20 @@ from pathlib import Path
 
 import pytest
 
-from manager.config import AppConfig, MissingConfigError
+from manager.config import AppConfig, MissingConfigError, get_settings
 
 
-# ---- Env cleanup ----
+# ---- Чистим env перед каждым тестом ----
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     keys = [
         "RADIO_YOUTUBE_API_KEY",
         "YOUTUBE_API_KEY",
-        "RADIO_YOUTUBE_STREAM_KEY",
-        "YOUTUBE_STREAM_KEY",
-        "YT_STREAM_KEY",
-        "RADIO_YOUTUBE_RTMP_ENABLED",
-        "YOUTUBE_RTMP_ENABLED",
-        "RADIO_YOUTUBE_RTMP_URL",
-        "YOUTUBE_RTMP_URL",
+        "RADIO_DATABASE_DSN",
+        "DATABASE_URL",
+        "POSTGRES_DSN",
+        "RADIO_ADMIN_TOKEN",
+        "ADMIN_TOKEN",
     ]
     for k in keys:
         monkeypatch.delenv(k, raising=False)
@@ -30,7 +28,7 @@ def _write_yaml(path: Path, text: str) -> Path:
     return path
 
 
-# ---- 1) YAML defaults load ----
+# ---- YAML загружает дефолты ----
 def test_yaml_defaults(tmp_path: Path) -> None:
     cfg = AppConfig.from_yaml(
         _write_yaml(
@@ -48,13 +46,18 @@ secrets: {}
         )
     )
     assert cfg.paths.base == Path("/opt/radio")
+    assert cfg.paths.youtube_telemetry_path == Path("/opt/radio/runtime/info/youtube_api.json")
     assert cfg.hls.hls_time == 6
     assert cfg.hls.hls_list_size == 12
     assert cfg.hls.hls_delete_threshold == 14
     assert cfg.hls.bitrates == [64, 96, 128]
+    assert cfg.search.interval_sec == 3600
+    assert cfg.search.window_size == 25
+    assert cfg.search.max_windows_per_tick == 1
+    assert cfg.search.quota_backoff_sec == 21600
 
 
-# ---- 2) Bitrates via YAML only ----
+# ---- Bitrates задаются только через YAML ----
 def test_yaml_custom_bitrates(tmp_path: Path) -> None:
     cfg = AppConfig.from_yaml(
         _write_yaml(
@@ -65,27 +68,47 @@ def test_yaml_custom_bitrates(tmp_path: Path) -> None:
     assert cfg.hls.bitrates == [32, 64, 192]
 
 
-# ---- 3) Lazy secret: API key missing raises on access ----
+def test_yaml_root_must_be_mapping(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="must define a mapping"):
+        AppConfig.from_yaml(_write_yaml(tmp_path / "config.yaml", "- bad\n- root\n"))
+
+
+# ---- Секреты валидируются лениво при доступе ----
 def test_missing_api_key_raises() -> None:
-    cfg = AppConfig.from_yaml()  # no file → defaults
+    cfg = AppConfig.from_yaml()  # файла нет -> дефолты
     with pytest.raises(MissingConfigError) as ei:
         _ = cfg.secrets.youtube_api_key
     assert "missing youtube api key" in str(ei.value).lower()
 
 
-# ---- 4) RTMP enabled without stream key → raises about stream key ----
-def test_rtmp_enabled_without_key_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RADIO_YOUTUBE_RTMP_ENABLED", "true")
+def test_api_key_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("YOUTUBE_API_KEY", "api-key")
+    cfg = AppConfig.from_yaml()
+    assert cfg.secrets.youtube_api_key.get_secret_value() == "api-key"
+
+
+def test_admin_token_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ADMIN_TOKEN", "admin-token")
+    cfg = AppConfig.from_yaml()
+    assert cfg.secrets.admin_token.get_secret_value() == "admin-token"
+
+
+def test_database_dsn_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql://radio:secret@localhost/radio")
+    cfg = AppConfig.from_yaml()
+    assert cfg.database.dsn.get_secret_value() == "postgresql://radio:secret@localhost/radio"
+
+
+def test_missing_database_dsn_raises() -> None:
     cfg = AppConfig.from_yaml()
     with pytest.raises(MissingConfigError) as ei:
-        _ = cfg.secrets.youtube_stream_url
-    assert "stream key" in str(ei.value).lower()
+        _ = cfg.database.dsn
+    assert "postgresql dsn" in str(ei.value).lower()
 
 
-# ---- 5) RTMP enabled with key → builds URL ----
-def test_rtmp_enabled_with_key_builds_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RADIO_YOUTUBE_RTMP_ENABLED", "1")
-    monkeypatch.setenv("RADIO_YOUTUBE_STREAM_KEY", "abc-123-xyz")
-    monkeypatch.setenv("RADIO_YOUTUBE_RTMP_URL", "rtmp://b.rtmp.youtube.com/live2")
-    cfg = AppConfig.from_yaml()
-    assert cfg.secrets.youtube_stream_url == "rtmp://b.rtmp.youtube.com/live2/abc-123-xyz"
+def test_get_settings_returns_cached_config() -> None:
+    get_settings.cache_clear()
+    first = get_settings()
+    second = get_settings()
+    assert first is second
+    get_settings.cache_clear()

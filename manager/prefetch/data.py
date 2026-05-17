@@ -12,6 +12,8 @@ from manager.prefetch.utils import iterate_files
 
 @dataclass(slots=True)
 class Metrics:
+    # Локальные счетчики воркера. Это не источник истины, а простой снимок
+    # состояния для будущих health/metrics.
     hits: int = 0
     misses: int = 0
     errors: int = 0
@@ -30,6 +32,8 @@ class Metrics:
         self.errors += 1
 
     def update_spaces(self, cold_dir: Path, hot_dir: Path, quota: int) -> None:
+        # Файлы считаем по факту на диске, потому что кеш может чиститься
+        # вручную или переживать рестарт pod.
         used = 0
         for path in iterate_files(cold_dir):
             try:
@@ -58,8 +62,8 @@ class Metrics:
 
 @dataclass(slots=True)
 class BlacklistState:
-    # Exponential backoff with per-id TTL in seconds
-    # schema: { "youtube_id": {"fails": int, "until_ts": float} }
+    # Экспоненциальная задержка по каждому YouTube id.
+    # Схема: { "youtube_id": {"fails": int, "until_ts": float} }
     data: dict[str, dict[str, float | int]] = field(default_factory=dict)
 
     @classmethod
@@ -75,6 +79,7 @@ class BlacklistState:
         return cls()
 
     def save(self, path: Path) -> None:
+        # Пишем через временный файл, чтобы не оставить битый JSON при падении.
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(self.data, ensure_ascii=False), encoding="utf-8")
@@ -89,7 +94,7 @@ class BlacklistState:
     def fail(self, youtube_id: str) -> None:
         rec = self.data.get(youtube_id) or {"fails": 0, "until_ts": 0.0}
         fails = int(rec.get("fails", 0)) + 1
-        delay = min(3600, 30 * (2 ** (fails - 1)))  # 30s, 60s, 120s, ..., cap 1h
+        delay = min(3600, 30 * (2 ** (fails - 1)))  # 30s, 60s, 120s, ..., максимум 1h
         self.data[youtube_id] = {"fails": fails, "until_ts": time.time() + delay}
 
     def reset(self, youtube_id: str) -> None:

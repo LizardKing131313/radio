@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from typing import Any, TypedDict
 
 
-# В моделях только структуры данных и конвертация из sqlite Row/Mapping.
+# В моделях только структуры данных и конвертация из DB Row/Mapping.
+# SQL, I/O и бизнес-действия здесь не живут.
 
 
 class TrackDict(TypedDict, total=False):
@@ -23,7 +24,7 @@ class TrackDict(TypedDict, total=False):
     play_count: int
     is_active: int
     deleted_at: str | None
-    # prefetch/cache telemetry (v5)
+    # Поля состояния кеша заполняет prefetch-воркер.
     cache_state: str | None  # 'none' | 'cold' | 'hot'
     cache_hot_until: str | None
     last_prefetch_at: str | None
@@ -33,7 +34,7 @@ class TrackDict(TypedDict, total=False):
 class QueueItemDict(TypedDict, total=False):
     id: int
     track_id: int
-    status: str
+    status: str  # pending | queued | playing | done | skipped
     requested_by: str | None
     note: str | None
     enqueued_at: str
@@ -73,7 +74,7 @@ class Track:
     play_count: int = 0
     is_active: int = 1
     deleted_at: str | None = None
-    # prefetch/cache telemetry (v5)
+    # Поля состояния кеша заполняет prefetch-воркер.
     cache_state: str | None = None
     cache_hot_until: str | None = None
     last_prefetch_at: str | None = None
@@ -104,7 +105,7 @@ class Track:
                 if "deleted_at" in row and row["deleted_at"] is not None
                 else None
             ),
-            # v5 fields (optional presence-safe)
+            # Эти поля могут отсутствовать в старых тестовых rows.
             cache_state=(
                 str(row["cache_state"])
                 if "cache_state" in row and row["cache_state"] is not None
@@ -143,7 +144,7 @@ class Track:
             play_count=self.play_count,
             is_active=self.is_active,
             deleted_at=self.deleted_at,
-            # v5
+            # Состояние кеша отдаем наружу вместе с треком.
             cache_state=self.cache_state,
             cache_hot_until=self.cache_hot_until,
             last_prefetch_at=self.last_prefetch_at,

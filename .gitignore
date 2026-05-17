@@ -21,6 +21,7 @@ logs/
 
 .env
 *.env
+deploy/k8s/secret.yaml
 
 .DS_Store
 Thumbs.db

@@ -79,7 +79,7 @@ jobs:
       - name: Pytest
         run: |
           pytest -q --maxfail=1 -r fE \
-            --cov=bots --cov=libs --cov-report=xml \
+            --cov --cov-report=xml \
             --junitxml=test-results/pytest.xml
 
       - name: Upload test reports
@@ -110,8 +110,55 @@ jobs:
       - name: Install minimal deps
         run: |
           python -m pip install -U pip wheel setuptools
-          python -m pip install aiogram
+          python -m pip install -e ".[dev]"
 
       - name: Smoke import
         run: |
-          python -c "import aiogram; print('aiogram:', aiogram.__version__)"
+          python -c "import manager; print('manager import ok')"
+
+  postgres-integration:
+    name: Postgres + Alembic integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: radio
+          POSTGRES_USER: radio
+          POSTGRES_PASSWORD: radio
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U radio -d radio"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "UTF-8"
+      RADIO_INTEGRATION_DATABASE_DSN: postgresql://radio:radio@localhost:5432/radio
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: |
+            pyproject.toml
+            requirements*.txt
+
+      - name: Install dependencies (dev extras)
+        run: |
+          python -m pip install -U pip wheel setuptools
+          python -m pip install -e ".[dev]"
+          python -m pip check
+
+      - name: Pytest integration
+        run: pytest -q tests/integration

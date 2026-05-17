@@ -1,129 +1,105 @@
 from __future__ import annotations
 
-import argparse
-import sqlite3
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
-from pathlib import Path
+
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine, make_url
+from sqlalchemy.exc import DBAPIError, SQLAlchemyError
+from sqlalchemy.orm import Session, sessionmaker
 
 from manager.config import AppConfig, get_settings
 from manager.logger import get_logger
-from manager.track_queue.migrations import MIGRATIONS
-
-
-@dataclass
-class DatabaseConfig:
-    pragmas: Sequence[str] = (
-        "PRAGMA journal_mode=WAL",
-        "PRAGMA synchronous=NORMAL",
-        "PRAGMA temp_store=MEMORY",
-        "PRAGMA foreign_keys=ON",
-        "PRAGMA busy_timeout=5000",
-    )
 
 
 class Database:
-    """Thin SQLite wrapper with simple SQL migrations."""
+    """Тонкая обертка над SQLAlchemy engine/session.
 
-    def __init__(self, app_config: AppConfig | None = None, path: Path | str | None = None) -> None:
-        cfg = app_config or get_settings()
-        self._path = Path(path) if path else cfg.paths.data_base
-        self._database_config = DatabaseConfig()
-        self._conn: sqlite3.Connection | None = None
-        self.logger = get_logger("data_base")
-        self.logger.info("Database initialized", path=self._path)
+    Все DDL живет в Alembic. `ensure_schema()` намеренно остается только
+    readiness-check, а не application-side миграцией.
+    """
 
-    def connect(self) -> sqlite3.Connection:
-        if self._conn is None:
-            # ВАЖНО: autocommit
-            self._conn = sqlite3.connect(self._path, check_same_thread=False, isolation_level=None)
-            self._conn.row_factory = sqlite3.Row
-            self._apply_pragmas(self._conn)
-        return self._conn
+    def __init__(
+        self,
+        app_config: AppConfig | None = None,
+        dsn: str | None = None,
+        engine: Engine | None = None,
+    ) -> None:
+        self._config = app_config or get_settings()
+        self._dsn = dsn or self._config.database.dsn.get_secret_value()
+        self._engine = engine or create_engine(
+            _sqlalchemy_dsn(self._dsn),
+            pool_pre_ping=True,
+            connect_args=(
+                {"connect_timeout": self._config.database.connect_timeout_sec}
+                if self._dsn.startswith("postgresql")
+                else {}
+            ),
+        )
+        self._sessions = sessionmaker(self._engine, expire_on_commit=False)
+        self.logger = get_logger("database")
+        self.logger.info("Database initialized", dsn=self._safe_dsn())
 
-    def close(self) -> None:
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
+    @property
+    def engine(self) -> Engine:
+        return self._engine
 
     @contextmanager
-    def tx(self) -> Iterator[sqlite3.Connection]:
-        conn = self.connect()
+    def session(self) -> Iterator[Session]:
+        # Один short-lived Session на операцию репозитория. Это проще и
+        # безопаснее, чем держать общий Session между воркерами.
+        session = self._sessions()
         try:
-            conn.execute("BEGIN")
-            yield conn
-            conn.execute("COMMIT")
+            yield session
+            session.commit()
         except Exception:
-            conn.execute("ROLLBACK")
+            session.rollback()
             raise
+        finally:
+            session.close()
 
-    # --- migrations -----------------------------------------------------------
+    def close(self) -> None:
+        self._engine.dispose()
 
     def ensure_schema(self) -> None:
-        """Apply all pending embedded migrations."""
-        with self.tx() as conn:
-            self._bootstrap_schema_migrations(conn)
-            current = self._current_version(conn)
-            for version, sql in sorted(MIGRATIONS, key=lambda x: x[0]):
-                if version > current:
-                    conn.executescript(sql)
-                    conn.execute(
-                        "INSERT INTO schema_migrations(version) VALUES (?)",
-                        (version,),
-                    )
+        # Проверяем именно таблицу tracks как базовый признак примененной схемы.
+        try:
+            with self.session() as session:
+                session.execute(text("SELECT 1 FROM tracks LIMIT 0"))
+        except SQLAlchemyError as exception:
+            if _looks_like_missing_table(exception):
+                raise RuntimeError(
+                    "Database schema is not ready. Run Alembic migrations before starting app."
+                ) from exception
+            raise
 
-    # --- helpers --------------------------------------------------------------
-
-    def _apply_pragmas(self, conn: sqlite3.Connection) -> None:
-        cur = conn.cursor()
-        for p in self._database_config.pragmas:
-            cur.execute(p)
-        cur.close()
-
-    @staticmethod
-    def _bootstrap_schema_migrations(conn: sqlite3.Connection) -> None:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS schema_migrations (
-                version     INTEGER PRIMARY KEY,
-                applied_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-            )
-            """
-        )
-
-    @staticmethod
-    def _current_version(conn: sqlite3.Connection) -> int:
-        row = conn.execute("SELECT MAX(version) AS v FROM schema_migrations").fetchone()
-        return int(row["v"]) if row and row["v"] is not None else 0
+    def _safe_dsn(self) -> str:
+        # DSN попадает в лог только с замаскированным password.
+        try:
+            return make_url(_sqlalchemy_dsn(self._dsn)).render_as_string(hide_password=True)
+        except Exception:
+            return "<invalid dsn>"
 
 
-# --- CLI: init/migrate --------------------------------------------------------
+def check_database_schema() -> int:
+    # CLI/readiness точка входа для Kubernetes probes.
+    database = Database()
+    database.ensure_schema()
+    database.close()
+    return 0
 
 
-def _cli() -> None:
-    parser = argparse.ArgumentParser(
-        prog="queue-db",
-        description="SQLite migrations for radio queue.",
+def _sqlalchemy_dsn(dsn: str) -> str:
+    if dsn.startswith("postgresql://"):
+        return "postgresql+psycopg://" + dsn.removeprefix("postgresql://")
+    return dsn
+
+
+def _looks_like_missing_table(exception: SQLAlchemyError) -> bool:
+    if isinstance(exception, DBAPIError):
+        message = str(exception.orig).lower()
+    else:
+        message = str(exception).lower()
+    return "tracks" in message and (
+        "does not exist" in message or "undefinedtable" in message or "no such table" in message
     )
-    parser.add_argument(
-        "--db",
-        dest="db_path",
-        type=Path,
-        required=True,
-        help="Path to SQLite database file (will be created if absent).",
-    )
-    sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("migrate", help="Apply embedded SQL migrations.")
-    args = parser.parse_args()
-
-    db = Database(path=args.db_path)
-    if args.cmd == "migrate":
-        db.ensure_schema()
-        # Keep CLI quiet.
-
-    db.close()
-
-
-if __name__ == "__main__":
-    _cli()
