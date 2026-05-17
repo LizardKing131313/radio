@@ -20,7 +20,8 @@ kubectl -n radio wait --for=condition=complete job/alembic --timeout=180s
 PostgreSQL schema is managed by Alembic from `alembic/versions`.
 Search uses YouTube Data API; downloads still use `yt-dlp`.
 FastAPI is exposed under `/api/`; `/current` includes Liquidsoap nowplaying plus HLS offset, `/health` includes YouTube
-API telemetry, `/metrics` returns compact runtime JSON, and admin mutations require `RADIO_ADMIN_TOKEN`.
+API telemetry, `/metrics` returns compact runtime JSON, `/metrics/prometheus` returns Prometheus exposition, and admin
+mutations require `RADIO_ADMIN_TOKEN`.
 Kubernetes owns runtime process restarts: search, prefetch, queue-player, API, Liquidsoap, FFmpeg and Nginx are separate
 containers in the `radio` pod.
 Manual admin queue uses Liquidsoap `request.queue`; downloads still use `yt-dlp`.

@@ -51,10 +51,10 @@ secrets: {}
     assert cfg.hls.hls_list_size == 12
     assert cfg.hls.hls_delete_threshold == 14
     assert cfg.hls.bitrates == [64, 96, 128]
-    assert cfg.search.interval_sec == 3600
-    assert cfg.search.window_size == 25
+    assert cfg.search.interval_sec == 21600
+    assert cfg.search.window_size == 10
     assert cfg.search.max_windows_per_tick == 1
-    assert cfg.search.quota_backoff_sec == 21600
+    assert cfg.search.quota_backoff_sec == 43200
 
 
 # ---- Bitrates задаются только через YAML ----

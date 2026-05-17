@@ -5,10 +5,10 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from hmac import compare_digest
 from pathlib import Path as FsPath
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from manager.config import AppConfig, MissingConfigError, get_settings
@@ -48,6 +48,7 @@ ADMIN_HTML = """<!doctype html>
     header { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 14px 18px; background: #17212b; color: white; }
     main { padding: 16px; display: grid; gap: 14px; }
     section { background: #ffffff; border: 1px solid #d7dde3; border-radius: 6px; color: #16202a; padding: 12px; }
+    h2 { margin: 0 0 10px; font-size: 16px; line-height: 1.3; }
     .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     input, select, button { min-height: 34px; border: 1px solid #b9c2cc; border-radius: 4px; box-sizing: border-box; color: #111827; padding: 0 10px; font: inherit; }
     input, select { background: #ffffff; }
@@ -92,6 +93,20 @@ ADMIN_HTML = """<!doctype html>
     </section>
     <section id="error" class="error" hidden></section>
     <section>
+      <h2>Очередь эфира</h2>
+      <table>
+        <thead><tr><th>ID</th><th>Трек</th><th>Статус</th></tr></thead>
+        <tbody id="queueItems"></tbody>
+      </table>
+    </section>
+    <section>
+      <h2>История очереди</h2>
+      <table>
+        <thead><tr><th>ID</th><th>Трек</th><th>Статус</th></tr></thead>
+        <tbody id="historyItems"></tbody>
+      </table>
+    </section>
+    <section>
       <div class="toolbar">
         <input id="query" placeholder="Поиск по названию, каналу, youtube id">
         <select id="status">
@@ -128,7 +143,7 @@ ADMIN_HTML = """<!doctype html>
     }
     async function load() {
       clearError();
-      const [healthResult, currentResult, queueResult] = await Promise.allSettled([json('/health'), json('/current'), json('/queue?limit=5')]);
+      const [currentResult, metricsResult] = await Promise.allSettled([json('/current'), json('/metrics')]);
       if (currentResult.status === 'fulfilled') {
         const src = currentResult.value.now_playing && currentResult.value.now_playing.source;
         el('current').textContent = src && src.line ? src.line : 'нет данных';
@@ -136,19 +151,21 @@ ADMIN_HTML = """<!doctype html>
         el('current').textContent = 'ошибка загрузки';
         setError(currentResult.reason);
       }
-      if (healthResult.status === 'fulfilled') {
-        const telemetry = healthResult.value.youtube_api || {};
-        el('youtube').textContent = telemetry.quota_exhausted ? 'quota exceeded' : (telemetry.status || 'нет данных');
-      } else {
-        el('youtube').textContent = 'ошибка загрузки';
-        setError(healthResult.reason);
-      }
-      if (queueResult.status === 'fulfilled') {
-        const items = Array.isArray(queueResult.value.items) ? queueResult.value.items : [];
+      if (metricsResult.status === 'fulfilled') {
+        const metrics = metricsResult.value;
+        const queue = metrics.queue || {};
+        const items = Array.isArray(queue.visible) ? queue.visible : [];
+        const history = Array.isArray(queue.history) ? queue.history : [];
         el('queue').textContent = items.length ? items.map(formatQueueItem).join(' | ') : 'пусто';
+        el('youtube').textContent = formatYoutube(metrics.youtube_api || {});
+        renderQueueTable('queueItems', items);
+        renderQueueTable('historyItems', history);
       } else {
         el('queue').textContent = 'ошибка загрузки';
-        setError(queueResult.reason);
+        el('youtube').textContent = 'ошибка загрузки';
+        renderQueueTable('queueItems', []);
+        renderQueueTable('historyItems', []);
+        setError(metricsResult.reason);
       }
       await loadTracks();
     }
@@ -210,6 +227,24 @@ ADMIN_HTML = """<!doctype html>
       const queueItem = item.queue_item || {};
       const track = item.track || {};
       return `${queueItem.status || '?'}: ${track.title || track.youtube_id || track.id || '?'}`;
+    }
+    function renderQueueTable(target, items) {
+      el(target).innerHTML = items.length ? items.map(queueRow).join('') : '<tr><td class="empty" colspan="3">Пусто</td></tr>';
+    }
+    function queueRow(item) {
+      const queueItem = item.queue_item || {};
+      const track = item.track || {};
+      return `<tr>
+        <td data-label="ID">${queueItem.id || ''}</td>
+        <td data-label="Трек"><b>${escapeHtml(track.title || 'Без названия')}</b><br><span class="muted">${escapeHtml(track.youtube_id || '')}</span></td>
+        <td data-label="Статус">${escapeHtml(queueItem.status || '?')}</td>
+      </tr>`;
+    }
+    function formatYoutube(telemetry) {
+      const status = telemetry.quota_exhausted ? 'квота закончилась' : (telemetry.status || 'нет данных');
+      const errors = telemetry.consecutive_errors ?? 0;
+      const units = telemetry.estimated_quota_units ?? 0;
+      return `${status}; ошибок подряд: ${errors}; units: ${units}`;
     }
     function escapeAttr(value) { return escapeHtml(value).replace(/`/g, '&#96;'); }
     function setError(error) {
@@ -297,6 +332,20 @@ def current(database: DatabaseDep) -> dict[str, object | None]:
 @app.get("/metrics")
 def metrics(database: DatabaseDep) -> dict[str, object]:
     settings = get_settings()
+    return _runtime_metrics(database, settings)
+
+
+@app.get("/metrics/prometheus", response_class=PlainTextResponse)
+def metrics_prometheus(database: DatabaseDep) -> PlainTextResponse:
+    settings = get_settings()
+    text = _prometheus_text(_runtime_metrics(database, settings))
+    return PlainTextResponse(
+        text,
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
+
+
+def _runtime_metrics(database: Database, settings: AppConfig) -> dict[str, object]:
     queue_repo = QueueRepo(database)
     return {
         "status": "ok",
@@ -308,6 +357,57 @@ def metrics(database: DatabaseDep) -> dict[str, object]:
         "current": current_snapshot(settings),
         "youtube_api": read_youtube_api_telemetry(settings.paths.youtube_telemetry_path),
     }
+
+
+def _prometheus_text(snapshot: dict[str, object]) -> str:
+    tracks = cast(dict[str, int], snapshot["tracks"])
+    queue = cast(dict[str, list[dict[str, object]]], snapshot["queue"])
+    current = cast(dict[str, object], snapshot["current"])
+    youtube_api = cast(dict[str, object], snapshot["youtube_api"])
+    hls = cast(dict[str, object], current["hls"])
+    visible = queue["visible"]
+    history = queue["history"]
+
+    # Prometheus endpoint намеренно строится из того же snapshot, что и JSON /metrics.
+    # Так мониторинг и человек в админке смотрят на один источник правды.
+    lines = [
+        "# HELP radio_tracks_total Количество треков по статусам каталога.",
+        "# TYPE radio_tracks_total gauge",
+    ]
+    for status_name, count in sorted(tracks.items()):
+        lines.append(
+            f'radio_tracks_total{{status="{_prometheus_label(str(status_name))}"}} {int(count)}'
+        )
+    lines.extend(
+        [
+            "# HELP radio_queue_visible_items Видимые элементы ручной очереди.",
+            "# TYPE radio_queue_visible_items gauge",
+            f"radio_queue_visible_items {len(visible)}",
+            "# HELP radio_queue_history_items Завершенные элементы ручной очереди.",
+            "# TYPE radio_queue_history_items gauge",
+            f"radio_queue_history_items {len(history)}",
+            "# HELP radio_youtube_quota_exhausted YouTube Data API вернул quota/rate limit.",
+            "# TYPE radio_youtube_quota_exhausted gauge",
+            f"radio_youtube_quota_exhausted {int(bool(youtube_api.get('quota_exhausted')))}",
+            "# HELP radio_youtube_consecutive_errors Подряд идущие ошибки YouTube Data API.",
+            "# TYPE radio_youtube_consecutive_errors gauge",
+            f"radio_youtube_consecutive_errors {int(cast(int | None, youtube_api.get('consecutive_errors')) or 0)}",
+            "# HELP radio_youtube_estimated_quota_units_total Оценка потраченных quota units.",
+            "# TYPE radio_youtube_estimated_quota_units_total counter",
+            f"radio_youtube_estimated_quota_units_total {int(cast(int | None, youtube_api.get('estimated_quota_units')) or 0)}",
+            "# HELP radio_hls_live_offset_seconds Расчетное отставание HLS от live edge.",
+            "# TYPE radio_hls_live_offset_seconds gauge",
+            f"radio_hls_live_offset_seconds {int(cast(int | None, hls.get('live_offset_sec')) or 0)}",
+            "# HELP radio_hls_nowplaying_age_seconds Возраст последнего nowplaying от Liquidsoap.",
+            "# TYPE radio_hls_nowplaying_age_seconds gauge",
+            f"radio_hls_nowplaying_age_seconds {int(cast(int | None, hls.get('age_sec')) or 0)}",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _prometheus_label(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
 
 
 @app.get("/queue")

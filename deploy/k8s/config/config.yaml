@@ -22,10 +22,10 @@ hls:
 
 search:
   title: "говновоз"
-  interval_sec: 3600
-  window_size: 25
+  interval_sec: 21600
+  window_size: 10
   max_windows_per_tick: 1
-  quota_backoff_sec: 21600
+  quota_backoff_sec: 43200
 
 prefetch:
   interval_sec: 10

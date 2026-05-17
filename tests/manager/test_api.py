@@ -95,6 +95,14 @@ def test_health_queue_current_and_admin_enqueue(api_context: tuple[TestClient, D
     assert metrics["tracks"]["active"] == 1
     assert metrics["queue"]["visible"][0]["queue_item"]["id"] == queue_id
 
+    prometheus = client.get("/metrics/prometheus")
+    assert prometheus.status_code == 200
+    assert "text/plain" in prometheus.headers["content-type"]
+    assert 'radio_tracks_total{status="active"} 1' in prometheus.text
+    assert "radio_queue_visible_items 2" in prometheus.text
+    assert "radio_youtube_quota_exhausted 0" in prometheus.text
+    assert "radio_hls_live_offset_seconds 18" in prometheus.text
+
 
 def test_offer_endpoints_and_admin_actions(api_context: tuple[TestClient, Database]) -> None:
     client, database = api_context
@@ -209,7 +217,11 @@ def test_track_admin_page_and_actions(
     tracks.update_track_audio(track_id=track_id, audio_path=str(cold))
     tracks.increment_fail_count(failed_id)
 
-    assert "Radio Admin" in client.get("/admin").text
+    admin_html = client.get("/admin").text
+    assert "Radio Admin" in admin_html
+    assert 'id="queueItems"' in admin_html
+    assert 'id="historyItems"' in admin_html
+    assert "formatYoutube" in admin_html
     tracks_response = client.get("/tracks?status=downloaded&q=track").json()
     assert tracks_response["items"][0]["id"] == track_id
     assert tracks_response["stats"]["downloaded"] == 1

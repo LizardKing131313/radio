@@ -7,9 +7,12 @@
 - Заменить старые systemd/shell deploy-доки после того, как Kubernetes-путь будет проверен на целевом хосте.
 - Добавлять YouTube Live RTMP только когда будет реализован сам push потока. До этого не держать stream keys в конфиге и
   манифестах.
-- Если локального `pg_dump` на PVC станет мало, заменить самописный CronJob на Postgres-оператор с нормальным
-  backup/restore lifecycle.
+- Если локального `pg_dump` на PVC станет мало, заменить CronJob на Postgres-оператор с нормальным backup/restore
+  lifecycle.
 - Если админка станет внешней публичной панелью, заменить один bearer token на нормальную auth-схему и audit log.
+- Если появится нормальный Prometheus/Grafana, подключить `/api/metrics/prometheus` через ServiceMonitor или обычный
+  scrape job. Сейчас endpoint уже есть, но оператор мониторинга не ставился, чтобы не плодить CRD ради локального
+  кластера.
 
 ## Сделано
 
@@ -32,6 +35,12 @@
   изображает аудио-оркестратор.
 - Добавлен `queue-player` worker: Postgres `pending/queued/playing` синхронизируется с Liquidsoap metadata.
 - Добавлен `/metrics` с компактным JSON по трекам, очереди, текущему эфиру и YouTube API.
+- Добавлен `/metrics/prometheus` в формате Prometheus exposition.
+- Админка показывает не только каталог, но и видимую очередь, историю очереди и счетчики YouTube API quota/errors.
 - Добавлен admin skip текущего эфира через Liquidsoap telnet API.
 - Добавлен минимальный Kubernetes CronJob для `pg_dump -Fc`.
+- Добавлены Makefile-команды `k8s-db`, `k8s-db-forward`, `k8s-backups`, `k8s-backup`, `k8s-restore` вместо отдельного
+  скрипта вокруг `kubectl`.
+- Добавлен Kubernetes `LimitRange`, чтобы задать дефолтные CPU/memory requests/limits без копипасты в каждом контейнере.
+- Снижена частота поиска через YouTube Data API: окно меньше, интервал и quota backoff длиннее.
 - В Docker-образ добавлен Node.js как JS runtime для `yt-dlp`, чтобы уменьшить отказы на YouTube player challenge.
