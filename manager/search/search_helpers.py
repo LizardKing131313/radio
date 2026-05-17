@@ -9,7 +9,6 @@ from urllib.request import Request, urlopen
 
 from manager.track_queue.models import TrackDict
 
-
 YOUTUBE_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
 YOUTUBE_VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
 

@@ -15,7 +15,6 @@ from manager.track_queue.db import Database
 from manager.track_queue.models import Track
 from manager.track_queue.repo import TracksRepo
 
-
 AUDIO_SUFFIXES = {".opus"}
 
 

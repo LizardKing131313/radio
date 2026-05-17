@@ -3,7 +3,6 @@ import xml.etree.ElementTree as elementTree
 
 import anybadge
 
-
 # Путь к SVG-бейджу покрытия.
 badge_file = pathlib.Path("badges/coverage.svg")
 badge_file.parent.mkdir(parents=True, exist_ok=True)

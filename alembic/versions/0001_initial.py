@@ -6,7 +6,6 @@ import sqlalchemy as sa
 
 from alembic import op
 
-
 revision: str = "0001_initial"
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
@@ -142,8 +141,7 @@ def upgrade() -> None:
     )
     op.execute("INSERT INTO config (key, value) VALUES ('queue.sort_step', '0.005')")
 
-    op.execute(
-        """
+    op.execute("""
         CREATE OR REPLACE FUNCTION queue_items_default_sort_key()
         RETURNS trigger
         LANGUAGE plpgsql
@@ -171,19 +169,15 @@ def upgrade() -> None:
             RETURN NEW;
         END;
         $$;
-        """
-    )
-    op.execute(
-        """
+        """)
+    op.execute("""
         CREATE TRIGGER trg_queue_default_sort_key
         BEFORE INSERT ON queue_items
         FOR EACH ROW
         EXECUTE FUNCTION queue_items_default_sort_key();
-        """
-    )
+        """)
 
-    op.execute(
-        """
+    op.execute("""
         CREATE OR REPLACE FUNCTION queue_items_status_timestamp()
         RETURNS trigger
         LANGUAGE plpgsql
@@ -200,19 +194,15 @@ def upgrade() -> None:
             RETURN NEW;
         END;
         $$;
-        """
-    )
-    op.execute(
-        """
+        """)
+    op.execute("""
         CREATE TRIGGER trg_queue_status_timestamp
         BEFORE UPDATE OF status ON queue_items
         FOR EACH ROW
         EXECUTE FUNCTION queue_items_status_timestamp();
-        """
-    )
+        """)
 
-    op.execute(
-        """
+    op.execute("""
         CREATE VIEW queue_visible AS
         SELECT
             qi.id AS queue_id,
@@ -231,8 +221,7 @@ def upgrade() -> None:
         JOIN tracks t ON t.id = qi.track_id
         WHERE qi.status IN ('playing', 'pending')
           AND t.deleted_at IS NULL;
-        """
-    )
+        """)
 
 
 def downgrade() -> None:

@@ -9,7 +9,6 @@ from alembic import context
 from manager.track_queue.db import _sqlalchemy_dsn
 from manager.track_queue.orm import Base
 
-
 config = context.config
 
 if config.config_file_name is not None:

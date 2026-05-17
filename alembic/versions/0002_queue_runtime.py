@@ -6,7 +6,6 @@ import sqlalchemy as sa
 
 from alembic import op
 
-
 revision: str = "0002_queue_runtime"
 down_revision: str | None = "0001_initial"
 branch_labels: str | Sequence[str] | None = None
@@ -31,8 +30,7 @@ def upgrade() -> None:
         unique=True,
         postgresql_where=sa.text("status IN ('pending', 'queued')"),
     )
-    op.execute(
-        """
+    op.execute("""
         CREATE VIEW queue_visible AS
         SELECT
             qi.id AS queue_id,
@@ -51,8 +49,7 @@ def upgrade() -> None:
         JOIN tracks t ON t.id = qi.track_id
         WHERE qi.status IN ('queued', 'playing', 'pending')
           AND t.deleted_at IS NULL;
-        """
-    )
+        """)
 
 
 def downgrade() -> None:
@@ -72,8 +69,7 @@ def downgrade() -> None:
         unique=True,
         postgresql_where=sa.text("status = 'pending'"),
     )
-    op.execute(
-        """
+    op.execute("""
         CREATE VIEW queue_visible AS
         SELECT
             qi.id AS queue_id,
@@ -92,5 +88,4 @@ def downgrade() -> None:
         JOIN tracks t ON t.id = qi.track_id
         WHERE qi.status IN ('playing', 'pending')
           AND t.deleted_at IS NULL;
-        """
-    )
+        """)

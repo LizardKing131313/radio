@@ -17,7 +17,6 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from manager.track_queue.models import Offer, QueueItem, Track
 
-
 ID_TYPE = BigInteger().with_variant(Integer, "sqlite")
 
 

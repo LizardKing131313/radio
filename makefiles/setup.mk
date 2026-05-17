@@ -64,7 +64,7 @@ compile-dev: pip-tools
 
 .PHONY: compile-all
 compile-all: pip-tools
-	$(PIP_COMPILE) pyproject.toml --extra dev --extra full -o requirements-all.txt
+	$(PIP_COMPILE) pyproject.toml --extra dev -o requirements-all.txt
 
 .PHONY: compile-every
 compile-every: compile compile-dev compile-all
@@ -74,7 +74,7 @@ compile-every: compile compile-dev compile-all
 compile-update: compile-every
 	$(PIP_COMPILE) -U pyproject.toml -o requirements.txt
 	$(PIP_COMPILE) -U pyproject.toml --extra dev -o requirements-dev.txt
-	$(PIP_COMPILE) -U pyproject.toml --extra dev --extra full -o requirements-all.txt
+	$(PIP_COMPILE) -U pyproject.toml --extra dev -o requirements-all.txt
 
 # ---- Sync (precise env) ------------------------------------------------------
 .PHONY: sync
