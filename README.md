@@ -28,6 +28,9 @@ Manual admin queue uses Liquidsoap `request.queue`; downloads still use `yt-dlp`
 
 Runtime details: [docs/runtime.md](docs/runtime.md).
 
+Single VPS provisioning is handled by Ansible: [ansible/README.md](ansible/README.md).
+It installs Docker + k3s, creates the `radio` user, builds the image on the VPS and applies `deploy/`.
+
 ## Local CI
 
 GitHub CI can be reproduced locally from PowerShell:

@@ -1,22 +1,294 @@
 ---
-# Radio playbook
-- hosts: vps_root
+- name: Bootstrap Python on a clean Debian/Ubuntu VPS
+  hosts: vps_root
   gather_facts: false
   become: false
-  roles:
-    - bootstrap    # security / updates / ufw / fail2ban/ sshd
-    - users        # create user radio + keys + sudo NOPASSWD
+  tasks:
+    - name: Install Python if the image is really bare
+      ansible.builtin.raw: |
+        test -x /usr/bin/python3 || (
+          apt-get update -y &&
+          DEBIAN_FRONTEND=noninteractive apt-get install -y python3
+        )
+      changed_when: false
 
-- hosts: vps_radio
+- name: Install and run radio on a single VPS with k3s
+  hosts: vps_root
+  gather_facts: true
   become: true
-  roles:
-    - packages     # base project packages
-    # - icecast    # TODO: later
-    # - streamer   # TODO: later
-    # - all future project deploys
+  vars:
+    radio_generated_dir: "{{ playbook_dir }}/.generated"
+    radio_secret_manifest: "{{ radio_app_dir }}/deploy/k8s/secret.yaml"
+  tasks:
+    - name: Fail early on unsupported OS
+      ansible.builtin.assert:
+        that:
+          - ansible_os_family == "Debian"
+        fail_msg: "This playbook supports Debian/Ubuntu VPS images."
 
-- hosts: vps_vpn
-  become: true
-  roles:
-    - role: wireguard_vpn
-      tags: [ vpn ]
+    - name: Create local directory for generated secrets
+      ansible.builtin.file:
+        path: "{{ radio_generated_dir }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      become: false
+
+    - name: Resolve secrets from env or generated local files
+      ansible.builtin.set_fact:
+        radio_effective_postgres_password: >-
+          {{
+            radio_postgres_password
+            | default(lookup(
+              'ansible.builtin.password',
+              radio_generated_dir + '/postgres_password length=32 chars=ascii_letters,digits'
+            ), true)
+          }}
+        radio_effective_admin_token: >-
+          {{
+            radio_admin_token
+            | default(lookup(
+              'ansible.builtin.password',
+              radio_generated_dir + '/admin_token length=48 chars=ascii_letters,digits'
+            ), true)
+          }}
+      no_log: true
+
+    - name: Read SSH public keys from controller files
+      ansible.builtin.set_fact:
+        radio_keys_from_files: >-
+          {{
+            radio_keys_from_files | default([]) +
+            [lookup('ansible.builtin.file', item, errors='ignore') | trim]
+          }}
+      loop: "{{ radio_authorized_key_files }}"
+      delegate_to: localhost
+      become: false
+
+    - name: Merge SSH public keys
+      ansible.builtin.set_fact:
+        radio_effective_authorized_keys: >-
+          {{ (radio_authorized_keys + (radio_keys_from_files | default([]))) | reject('equalto', '') | list }}
+
+    - name: Validate required public settings and YouTube key
+      ansible.builtin.assert:
+        that:
+          - radio_youtube_api_key | length > 0
+          - radio_youtube_api_key != "change-me"
+          - radio_nodeport | int >= 30000
+          - radio_nodeport | int <= 32767
+        fail_msg: "Set RADIO_YOUTUBE_API_KEY in the controller env before running Ansible."
+
+    - name: Install base packages
+      ansible.builtin.apt:
+        name:
+          - acl
+          - ca-certificates
+          - curl
+          - docker.io
+          - git
+          - gnupg
+          - make
+          - python3
+          - python3-apt
+          - rsync
+          - sudo
+          - ufw
+        state: present
+        update_cache: true
+
+    - name: Ensure Docker is running for local image builds
+      ansible.builtin.systemd:
+        name: docker
+        enabled: true
+        state: started
+
+    - name: Recreate radio user when explicitly requested
+      ansible.builtin.user:
+        name: "{{ radio_user }}"
+        state: absent
+        remove: true
+      when: radio_recreate_user | bool
+
+    - name: Create radio user
+      ansible.builtin.user:
+        name: "{{ radio_user }}"
+        shell: /bin/bash
+        create_home: true
+        groups: sudo
+        append: true
+        state: present
+
+    - name: Allow passwordless sudo for radio user
+      ansible.builtin.copy:
+        dest: "/etc/sudoers.d/{{ radio_user }}"
+        content: "{{ radio_user }} ALL=(ALL) NOPASSWD:ALL\n"
+        owner: root
+        group: root
+        mode: "0440"
+        validate: "visudo -cf %s"
+
+    - name: Create SSH directory for radio user
+      ansible.builtin.file:
+        path: "/home/{{ radio_user }}/.ssh"
+        state: directory
+        owner: "{{ radio_user }}"
+        group: "{{ radio_user }}"
+        mode: "0700"
+
+    - name: Install SSH keys for radio user
+      ansible.builtin.copy:
+        dest: "/home/{{ radio_user }}/.ssh/authorized_keys"
+        content: "{{ radio_effective_authorized_keys | join('\n') }}\n"
+        owner: "{{ radio_user }}"
+        group: "{{ radio_user }}"
+        mode: "0600"
+      when: radio_effective_authorized_keys | length > 0
+
+    - name: Allow required TCP ports in UFW
+      ansible.builtin.command: "ufw allow {{ item }}/tcp"
+      loop: "{{ radio_firewall_tcp_ports }}"
+      changed_when: false
+      when: radio_manage_firewall | bool
+
+    - name: Enable UFW
+      ansible.builtin.command: ufw --force enable
+      changed_when: false
+      when: radio_manage_firewall | bool
+
+    - name: Check k3s binary
+      ansible.builtin.stat:
+        path: /usr/local/bin/k3s
+      register: radio_k3s_binary
+
+    - name: Download k3s installer
+      ansible.builtin.get_url:
+        url: https://get.k3s.io
+        dest: /tmp/install-k3s.sh
+        mode: "0755"
+      when: not radio_k3s_binary.stat.exists
+
+    - name: Install k3s
+      ansible.builtin.command: /tmp/install-k3s.sh
+      environment:
+        INSTALL_K3S_CHANNEL: "{{ k3s_channel }}"
+        INSTALL_K3S_EXEC: "{{ k3s_exec }}"
+      when: not radio_k3s_binary.stat.exists
+
+    - name: Ensure k3s is running
+      ansible.builtin.systemd:
+        name: k3s
+        enabled: true
+        state: started
+
+    - name: Wait until Kubernetes API is ready
+      ansible.builtin.command: k3s kubectl get nodes
+      register: radio_kubectl_nodes
+      retries: 30
+      delay: 2
+      until: radio_kubectl_nodes.rc == 0
+      changed_when: false
+
+    - name: Give radio user kubectl access on the VPS
+      ansible.builtin.file:
+        path: "/home/{{ radio_user }}/.kube"
+        state: directory
+        owner: "{{ radio_user }}"
+        group: "{{ radio_user }}"
+        mode: "0700"
+
+    - name: Copy k3s kubeconfig for radio user
+      ansible.builtin.copy:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: "/home/{{ radio_user }}/.kube/config"
+        remote_src: true
+        owner: "{{ radio_user }}"
+        group: "{{ radio_user }}"
+        mode: "0600"
+
+    - name: Create application directory
+      ansible.builtin.file:
+        path: "{{ radio_app_dir }}"
+        state: directory
+        owner: "{{ radio_user }}"
+        group: "{{ radio_user }}"
+        mode: "0755"
+
+    - name: Sync project sources to VPS
+      ansible.posix.synchronize:
+        src: "{{ playbook_dir }}/../"
+        dest: "{{ radio_app_dir }}/"
+        delete: false
+        rsync_opts: "{{ radio_rsync_excludes }}"
+
+    - name: Fix application directory owner after sync
+      ansible.builtin.file:
+        path: "{{ radio_app_dir }}"
+        state: directory
+        owner: "{{ radio_user }}"
+        group: "{{ radio_user }}"
+        recurse: true
+
+    - name: Write Kubernetes Secret manifest on the VPS
+      ansible.builtin.copy:
+        dest: "{{ radio_secret_manifest }}"
+        owner: "{{ radio_user }}"
+        group: "{{ radio_user }}"
+        mode: "0600"
+        content: |
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: radio-secrets
+          type: Opaque
+          stringData:
+            POSTGRES_DB: {{ radio_postgres_db | quote }}
+            POSTGRES_USER: {{ radio_postgres_user | quote }}
+            POSTGRES_PASSWORD: {{ radio_effective_postgres_password | quote }}
+            RADIO_DATABASE_DSN: {{ radio_database_dsn | quote }}
+            RADIO_YOUTUBE_API_KEY: {{ radio_youtube_api_key | quote }}
+            RADIO_ADMIN_TOKEN: {{ radio_effective_admin_token | quote }}
+      vars:
+        radio_database_dsn: >-
+          postgresql://{{ radio_postgres_user }}:{{ radio_effective_postgres_password | urlencode
+          }}@postgres:5432/{{ radio_postgres_db }}
+      no_log: true
+
+    - name: Build application image on the VPS
+      ansible.builtin.command: "docker build -t {{ radio_image }} -f docker/app/Dockerfile ."
+      args:
+        chdir: "{{ radio_app_dir }}"
+
+    - name: Import application image into k3s containerd
+      ansible.builtin.shell: |
+        set -euo pipefail
+        docker save {{ radio_image }} -o /tmp/radio-manager.tar
+        k3s ctr images import /tmp/radio-manager.tar
+        rm -f /tmp/radio-manager.tar
+      args:
+        executable: /bin/bash
+
+    - name: Delete old Alembic job so migrations run on every deploy
+      ansible.builtin.command: k3s kubectl -n radio delete job alembic --ignore-not-found=true
+      register: radio_delete_alembic
+      changed_when: "'deleted' in radio_delete_alembic.stdout"
+
+    - name: Apply Kubernetes manifests
+      ansible.builtin.command: k3s kubectl apply -k deploy
+      args:
+        chdir: "{{ radio_app_dir }}"
+
+    - name: Wait for Alembic migrations
+      ansible.builtin.command: k3s kubectl -n radio wait --for=condition=complete job/alembic --timeout=180s
+      changed_when: false
+
+    - name: Wait for radio deployment
+      ansible.builtin.command: k3s kubectl -n radio rollout status deployment/radio --timeout=300s
+      changed_when: false
+
+    - name: Show public URL and useful commands
+      ansible.builtin.debug:
+        msg:
+          - "Radio URL: http://{{ ansible_host | default(inventory_hostname) }}:{{ radio_nodeport }}"
+          - "Status: ssh {{ radio_user }}@HOST 'kubectl -n radio get pods,svc'"
+          - "Admin token file: {{ radio_generated_dir }}/admin_token unless RADIO_ADMIN_TOKEN was set."

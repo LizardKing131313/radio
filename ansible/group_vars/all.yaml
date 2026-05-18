@@ -1,41 +1,51 @@
 ---
-root_ssh_key_files:
+# VPS user that owns the project files and can run kubectl for diagnostics.
+radio_user: radio
+radio_recreate_user: false
+
+# Public keys copied to /home/radio/.ssh/authorized_keys.
+radio_authorized_key_files:
   - "~/.ssh/id_ed25519.pub"
+radio_authorized_keys: [ ]
 
-# === SSH ===
+# Kubernetes on a single VPS: k3s gives us the orchestration layer without
+# maintaining our own runner/process supervisor.
+k3s_channel: stable
+k3s_exec: "server --disable traefik --write-kubeconfig-mode 0644"
+
+# Project deployment paths and image name used by deploy/k8s/*.yaml.
+radio_app_dir: /opt/radio/app
+radio_image: radio-manager:latest
+radio_nodeport: 30080
+
+# Secrets: YouTube key is required. Password/token are generated into
+# ansible/.generated/ if env vars are not provided.
+radio_postgres_db: radio
+radio_postgres_user: radio
+radio_postgres_password: "{{ lookup('ansible.builtin.env', 'RADIO_POSTGRES_PASSWORD') }}"
+radio_youtube_api_key: "{{ lookup('ansible.builtin.env', 'RADIO_YOUTUBE_API_KEY') }}"
+radio_admin_token: "{{ lookup('ansible.builtin.env', 'RADIO_ADMIN_TOKEN') }}"
+
+# Minimal firewall: SSH + the Kubernetes NodePort that exposes nginx/HLS/API.
 ssh_port: 22
-
-# === UFW ===
-ufw_allow_tcp_ports:
+radio_manage_firewall: true
+radio_firewall_tcp_ports:
   - "{{ ssh_port }}"
-#  - 80
-#  - 443
-#  - 8000    # Icecast
-#  - 1935    # RTMP
+  - "{{ radio_nodeport }}"
 
-# === fail2ban
-fail2ban_bantime: "15m"
-fail2ban_findtime: "10m"
-fail2ban_maxretry: 10
-fail2ban_ignoreip:
-  - "127.0.0.1/8"
-  - "::1"
-
-# === Users ===
-users_enabled: true
-users_list:
-  - name: radio
-    shell: /bin/bash
-    state: present
-    sudo_nopasswd: true
-    ssh_key_files:
-      - "~/.ssh/id_ed25519.pub"
-    # ssh_keys: []
-
-# === Packages ===
-packages_enabled: true
-packages_list:
-  - ffmpeg
-  - yt-dlp
-  - icecast2
-  - curl
+# Do not upload local build/test/cache/secrets to the VPS.
+radio_rsync_excludes:
+  - "--exclude=.git"
+  - "--exclude=.idea"
+  - "--exclude=.mypy_cache"
+  - "--exclude=.pytest_cache"
+  - "--exclude=.ruff_cache"
+  - "--exclude=.venv"
+  - "--exclude=.venv-wsl"
+  - "--exclude=htmlcov"
+  - "--exclude=logs"
+  - "--exclude=qodana"
+  - "--exclude=radio_manager.egg-info"
+  - "--exclude=test-results"
+  - "--exclude=deploy/k8s/secret.yaml"
+  - "--exclude=ansible/.generated"

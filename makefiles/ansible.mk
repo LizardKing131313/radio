@@ -10,7 +10,7 @@ VENV           ?= .venv-wsl
 PYTHON_BIN     ?= python3
 PIP_BIN        ?= pip
 PLAYBOOK       ?= ansible/site.yml
-INVENTORY      ?= ansible/hosts.ini,ansible/hosts.local.ini
+INVENTORY      ?= ansible/inventory/hosts.yml
 GALAXY_REQ     ?= ansible/requirements.yml
 ANSIBLE_CFG    ?= ansible/ansible.cfg
 VAULT_FILE     ?= ansible/group_vars/all/vault.yml
@@ -30,17 +30,17 @@ help-ansible: ## Показать хелп по целям Ansible
 ansible.init: ## Установить базовые пакеты (apt), создать venv и поставить ansible + ansible-lint
 	@echo "==> APT: base utils"
 	sudo apt-get update -y
-	sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv python3-pip git openssh-client dos2unix build-essential libssl-dev libffi-dev python3-dev
+	sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv python3-pip git openssh-client rsync
 	@echo "==> Python venv: $(VENV)"
 	@if [[ ! -d "$(VENV)" ]]; then $(PYTHON_BIN) -m venv "$(VENV)"; fi
 	@echo "==> pip upgrade & install ansible"
 	@$(ACTIVATE); $(PYTHON_BIN) -m $(PIP_BIN) install --upgrade pip
-	@$(ACTIVATE); $(PYTHON_BIN) -m $(PIP_BIN) install "ansible>=9" ansible-lint
+	@$(ACTIVATE); $(PYTHON_BIN) -m $(PIP_BIN) install --upgrade ansible ansible-lint
 	@$(ACTIVATE); $(AI) --version || true
 	@echo "==> Done."
 
 ansible.upgrade: ## Обновить ansible и ansible-lint в venv
-	@$(ACTIVATE); $(PYTHON_BIN) -m $(PIP_BIN) install --upgrade "ansible>=9" ansible-lint
+	@$(ACTIVATE); $(PYTHON_BIN) -m $(PIP_BIN) install --upgrade ansible ansible-lint
 	@$(ACTIVATE); $(AI) --version
 
 # ===== Galaxy =====

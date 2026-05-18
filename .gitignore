@@ -39,6 +39,7 @@ NUL
 .vault_pass.txt
 hosts.local.ini
 hosts.local.yml
+ansible/.generated/
 
 .wg-clients/
 wg-clients/
