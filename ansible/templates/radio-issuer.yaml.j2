@@ -1,0 +1,14 @@
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: radio-letsencrypt
+spec:
+  acme:
+    email: "{{ radio_tls_email }}"
+    server: "{{ radio_acme_server }}"
+    privateKeySecretRef:
+      name: radio-letsencrypt-account
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: "{{ radio_ingress_class }}"

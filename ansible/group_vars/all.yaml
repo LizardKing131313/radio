@@ -1,7 +1,9 @@
 ---
-# VPS user that owns the project files and can run kubectl for diagnostics.
+# VPS user that owns the project files.
 radio_user: radio
 radio_recreate_user: false
+radio_passwordless_sudo: false
+radio_install_kubeconfig: false
 
 # Public keys copied to /home/radio/.ssh/authorized_keys.
 radio_authorized_key_files:
@@ -11,12 +13,24 @@ radio_authorized_keys: [ ]
 # Kubernetes on a single VPS: k3s gives us the orchestration layer without
 # maintaining our own runner/process supervisor.
 k3s_channel: stable
-k3s_exec: "server --disable traefik --write-kubeconfig-mode 0644"
+radio_k3s_reconfigure: true
+k3s_exec: "server --disable traefik --secrets-encryption --write-kubeconfig-mode 0600"
 
 # Project deployment paths and image name used by deploy/k8s/*.yaml.
 radio_app_dir: /opt/radio/app
 radio_image: radio-manager:latest
-radio_nodeport: 30080
+radio_domain: "{{ lookup('ansible.builtin.env', 'RADIO_DOMAIN') }}"
+radio_tls_email: "{{ lookup('ansible.builtin.env', 'RADIO_TLS_EMAIL') }}"
+radio_tls_staging: false
+radio_ingress_class: nginx
+radio_cert_manager_manifest_url: >-
+  https://github.com/cert-manager/cert-manager/releases/download/v1.20.2/cert-manager.yaml
+radio_ingress_nginx_manifest_url: >-
+  https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.15.1/deploy/static/provider/cloud/deploy.yaml
+radio_acme_server: >-
+  {{ 'https://acme-staging-v02.api.letsencrypt.org/directory'
+     if radio_tls_staging | bool
+     else 'https://acme-v02.api.letsencrypt.org/directory' }}
 
 # Secrets: YouTube key is required. Password/token are generated into
 # ansible/.generated/ if env vars are not provided.
@@ -26,12 +40,15 @@ radio_postgres_password: "{{ lookup('ansible.builtin.env', 'RADIO_POSTGRES_PASSW
 radio_youtube_api_key: "{{ lookup('ansible.builtin.env', 'RADIO_YOUTUBE_API_KEY') }}"
 radio_admin_token: "{{ lookup('ansible.builtin.env', 'RADIO_ADMIN_TOKEN') }}"
 
-# Minimal firewall: SSH + the Kubernetes NodePort that exposes nginx/HLS/API.
+# Minimal firewall: SSH + public HTTP/HTTPS handled by ingress-nginx.
 ssh_port: 22
 radio_manage_firewall: true
+radio_harden_ssh: true
+radio_install_fail2ban: true
 radio_firewall_tcp_ports:
   - "{{ ssh_port }}"
-  - "{{ radio_nodeport }}"
+  - 80
+  - 443
 
 # Do not upload local build/test/cache/secrets to the VPS.
 radio_rsync_excludes:

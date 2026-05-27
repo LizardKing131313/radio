@@ -3,15 +3,13 @@ kind: Service
 metadata:
   name: radio
 spec:
-  type: NodePort
+  type: ClusterIP
   selector:
     app.kubernetes.io/name: radio
   ports:
     - name: http
       port: 80
       targetPort: nginx
-      # Локальный Docker Desktop открывает NodePort на 127.0.0.1:30080.
-      nodePort: 30080
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -27,6 +25,11 @@ spec:
       labels:
         app.kubernetes.io/name: radio
     spec:
+      securityContext:
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         # Контейнеры приложения не должны стартовать раньше Postgres.
         - name: wait-postgres
@@ -67,6 +70,7 @@ spec:
                 /opt/radio/www/hls/mp4
               rm -f /opt/radio/runtime/fifo/radio.wav
               mkfifo /opt/radio/runtime/fifo/radio.wav
+              chown -R 10001:10001 /opt/radio/cache /opt/radio/runtime /opt/radio/www
           volumeMounts:
             - name: radio-cache
               mountPath: /opt/radio/cache
@@ -79,6 +83,14 @@ spec:
         - name: search
           image: radio-manager:latest
           imagePullPolicy: IfNotPresent
+          securityContext: &radio-app-security-context
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsGroup: 10001
+            runAsNonRoot: true
+            runAsUser: 10001
           command: [ "python", "-m", "manager", "search" ]
           envFrom:
             - secretRef:
@@ -97,6 +109,7 @@ spec:
         - name: prefetch
           image: radio-manager:latest
           imagePullPolicy: IfNotPresent
+          securityContext: *radio-app-security-context
           command: [ "python", "-m", "manager", "prefetch" ]
           envFrom:
             - secretRef:
@@ -116,6 +129,7 @@ spec:
         - name: queue-player
           image: radio-manager:latest
           imagePullPolicy: IfNotPresent
+          securityContext: *radio-app-security-context
           command: [ "python", "-m", "manager", "queue-player" ]
           envFrom:
             - secretRef:
@@ -136,6 +150,7 @@ spec:
         - name: api
           image: radio-manager:latest
           imagePullPolicy: IfNotPresent
+          securityContext: *radio-app-security-context
           command: [ "uvicorn", "manager.api:app", "--host", "0.0.0.0", "--port", "8000" ]
           envFrom:
             - secretRef:
@@ -160,6 +175,7 @@ spec:
         - name: liquidsoap
           image: radio-manager:latest
           imagePullPolicy: IfNotPresent
+          securityContext: *radio-app-security-context
           command: [ "liquidsoap", "-v", "/opt/radio/data/radio.liq" ]
           volumeMounts:
             - name: radio-config
@@ -172,6 +188,7 @@ spec:
         - name: ffmpeg
           image: radio-manager:latest
           imagePullPolicy: IfNotPresent
+          securityContext: *radio-app-security-context
           command: [ "python", "-m", "manager", "ffmpeg-hls" ]
           volumeMounts:
             - name: radio-config
@@ -181,7 +198,7 @@ spec:
             - name: radio-www
               mountPath: /opt/radio/www
         # Nginx отдает HLS из общего emptyDir и проксирует /api/.
-        # Наружу его публикует Service radio через NodePort 30080.
+        # Наружу его публикует ingress-nginx через Service radio.
         - name: nginx
           image: nginx:1.27-alpine
           ports:

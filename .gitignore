@@ -41,9 +41,6 @@ hosts.local.ini
 hosts.local.yml
 ansible/.generated/
 
-.wg-clients/
-wg-clients/
-
 search/_ydl/
 *.part
 *.ytdl

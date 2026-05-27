@@ -6,6 +6,8 @@
 pod `radio`, а внутри него отдельные контейнеры для узлов пайплайна:
 
 ```text
+Internet -> ingress-nginx -> Service radio -> pod nginx
+
 search -> PostgreSQL -> prefetch -> cache PVC -> Liquidsoap -> FIFO -> FFmpeg -> HLS -> Nginx
                     queue-player -> Liquidsoap request.queue
                               API -> Nginx /api/
@@ -44,8 +46,9 @@ search -> PostgreSQL -> prefetch -> cache PVC -> Liquidsoap -> FIFO -> FFmpeg ->
    компактный JSON по трекам, очереди, текущему эфиру и YouTube API. Кнопка
    админки `Сейчас` вызывает `/tracks/{id}/play-now`: трек пушится напрямую в
    Liquidsoap и не создает строку в ручной очереди.
-8. `nginx` отдает HLS из общего `emptyDir` volume и проксирует `/api/` в
-   FastAPI-контейнер.
+8. `nginx` внутри pod отдает HLS из общего `emptyDir` volume и проксирует
+   `/api/` в FastAPI-контейнер. Снаружи к нему ведет `ingress-nginx` через
+   внутренний `ClusterIP` Service.
 9. `postgres-backup` CronJob раз в сутки делает `pg_dump -Fc` в
    `radio-cache/postgres` и чистит дампы старше 14 дней.
 10. `LimitRange radio-defaults` задает дефолтные `requests/limits` для всех
@@ -107,6 +110,8 @@ Redis и RTMP-конфиг сейчас убраны: активный код и
 cp deploy/k8s/secret.example.yaml deploy/k8s/secret.yaml
 # edit deploy/k8s/secret.yaml locally; it is ignored by git
 docker build -t radio-manager:latest -f docker/app/Dockerfile .
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.20.2/cert-manager.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.15.1/deploy/static/provider/cloud/deploy.yaml
 kubectl apply -k deploy
 kubectl -n radio wait --for=condition=complete job/alembic --timeout=180s
 ```
@@ -119,8 +124,22 @@ kubectl kustomize deploy
 
 ## Где слушать
 
-Service `radio` опубликован как `NodePort`, поэтому для локального Docker
-Desktop port-forward не нужен:
+В production публичный вход идет через ingress-nginx и cert-manager:
+
+```text
+https://RADIO_DOMAIN/hls/mp4/playlist.m3u8
+https://RADIO_DOMAIN/api/health
+https://RADIO_DOMAIN/api/current
+https://RADIO_DOMAIN/api/metrics
+https://RADIO_DOMAIN/api/metrics/prometheus
+https://RADIO_DOMAIN/api/admin
+```
+
+Для локальной проверки без DNS можно сделать port-forward во внутренний Service:
+
+```bash
+kubectl -n radio port-forward svc/radio 30080:80
+```
 
 ```text
 http://127.0.0.1:30080/hls/mp4/playlist.m3u8

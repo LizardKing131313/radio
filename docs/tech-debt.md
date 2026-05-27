@@ -4,7 +4,6 @@
 
 - Добавлять Redis только там, где он реально убирает проблему состояния. Хорошие кандидаты: короткие lock-и, rate limit
   и временный кеш текущего трека. Не использовать Redis как источник истины для очереди или предложек.
-- Заменить старые systemd/shell deploy-доки после того, как Kubernetes-путь будет проверен на целевом хосте.
 - Добавлять YouTube Live RTMP только когда будет реализован сам push потока. До этого не держать stream keys в конфиге и
   манифестах.
 - Если локального `pg_dump` на PVC станет мало, заменить CronJob на Postgres-оператор с нормальным backup/restore
@@ -44,3 +43,4 @@
 - Добавлен Kubernetes `LimitRange`, чтобы задать дефолтные CPU/memory requests/limits без копипасты в каждом контейнере.
 - Снижена частота поиска через YouTube Data API: окно меньше, интервал и quota backoff длиннее.
 - В Docker-образ добавлен Node.js как JS runtime для `yt-dlp`, чтобы уменьшить отказы на YouTube player challenge.
+- Удалены старые systemd/shell/cloudflared deploy-артефакты после перехода на k3s, ingress-nginx и cert-manager.

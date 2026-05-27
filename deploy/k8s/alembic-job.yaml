@@ -10,11 +10,22 @@ spec:
         app.kubernetes.io/name: alembic
     spec:
       restartPolicy: OnFailure
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         # Схемой владеет Alembic. Приложение только проверяет, что таблицы уже есть.
         - name: alembic
           image: radio-manager:latest
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsGroup: 10001
+            runAsNonRoot: true
+            runAsUser: 10001
           command: [ "alembic", "upgrade", "head" ]
           envFrom:
             - secretRef:

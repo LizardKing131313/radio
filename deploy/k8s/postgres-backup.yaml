@@ -16,6 +16,9 @@ spec:
             app.kubernetes.io/name: postgres-backup
         spec:
           restartPolicy: OnFailure
+          securityContext:
+            seccompProfile:
+              type: RuntimeDefault
           containers:
             - name: pg-dump
               image: postgres:16-alpine

@@ -1,0 +1,46 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: radio-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: radio
+  policyTypes:
+    - Ingress
+  ingress:
+    # Снаружи к pod приходит только ingress-nginx. API доступен через nginx на /api/.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    # Postgres принимает вход только от приложения, миграций и backup job.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: radio
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: alembic
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres-backup
+      ports:
+        - protocol: TCP
+          port: 5432

@@ -19,6 +19,8 @@
   vars:
     radio_generated_dir: "{{ playbook_dir }}/.generated"
     radio_secret_manifest: "{{ radio_app_dir }}/deploy/k8s/secret.yaml"
+    radio_issuer_manifest: "{{ radio_app_dir }}/deploy/k8s/issuer.yaml"
+    radio_ingress_manifest: "{{ radio_app_dir }}/deploy/k8s/ingress.yaml"
   tasks:
     - name: Fail early on unsupported OS
       ansible.builtin.assert:
@@ -70,14 +72,21 @@
         radio_effective_authorized_keys: >-
           {{ (radio_authorized_keys + (radio_keys_from_files | default([]))) | reject('equalto', '') | list }}
 
+    - name: Refuse SSH hardening without public keys
+      ansible.builtin.assert:
+        that:
+          - radio_effective_authorized_keys | length > 0
+        fail_msg: "Set radio_authorized_key_files/radio_authorized_keys before disabling SSH password login."
+      when: radio_harden_ssh | bool
+
     - name: Validate required public settings and YouTube key
       ansible.builtin.assert:
         that:
           - radio_youtube_api_key | length > 0
           - radio_youtube_api_key != "change-me"
-          - radio_nodeport | int >= 30000
-          - radio_nodeport | int <= 32767
-        fail_msg: "Set RADIO_YOUTUBE_API_KEY in the controller env before running Ansible."
+          - radio_domain | length > 0
+          - radio_tls_email | length > 0
+        fail_msg: "Set RADIO_YOUTUBE_API_KEY, RADIO_DOMAIN and RADIO_TLS_EMAIL before running Ansible."
 
     - name: Install base packages
       ansible.builtin.apt:
@@ -97,6 +106,12 @@
         state: present
         update_cache: true
 
+    - name: Install fail2ban when SSH jail is enabled
+      ansible.builtin.apt:
+        name: fail2ban
+        state: present
+      when: radio_install_fail2ban | bool
+
     - name: Ensure Docker is running for local image builds
       ansible.builtin.systemd:
         name: docker
@@ -115,7 +130,7 @@
         name: "{{ radio_user }}"
         shell: /bin/bash
         create_home: true
-        groups: sudo
+        groups: "{{ 'sudo' if radio_passwordless_sudo | bool else omit }}"
         append: true
         state: present
 
@@ -127,6 +142,13 @@
         group: root
         mode: "0440"
         validate: "visudo -cf %s"
+      when: radio_passwordless_sudo | bool
+
+    - name: Remove passwordless sudo for radio user by default
+      ansible.builtin.file:
+        path: "/etc/sudoers.d/{{ radio_user }}"
+        state: absent
+      when: not radio_passwordless_sudo | bool
 
     - name: Create SSH directory for radio user
       ansible.builtin.file:
@@ -145,6 +167,70 @@
         mode: "0600"
       when: radio_effective_authorized_keys | length > 0
 
+    - name: Install SSH keys for root before password login is disabled
+      ansible.posix.authorized_key:
+        user: root
+        key: "{{ item }}"
+        state: present
+      loop: "{{ radio_effective_authorized_keys }}"
+      when: radio_harden_ssh | bool
+
+    - name: Ensure SSH include directory exists
+      ansible.builtin.file:
+        path: /etc/ssh/sshd_config.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: radio_harden_ssh | bool
+
+    - name: Harden SSH password login
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/99-radio-hardening.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          PubkeyAuthentication yes
+          PermitRootLogin prohibit-password
+          X11Forwarding no
+      register: radio_sshd_hardening
+      when: radio_harden_ssh | bool
+
+    - name: Validate SSH configuration
+      ansible.builtin.command: /usr/sbin/sshd -t
+      changed_when: false
+      when: radio_harden_ssh | bool
+
+    - name: Reload SSH after hardening
+      ansible.builtin.systemd:
+        name: ssh
+        state: reloaded
+      when: radio_harden_ssh | bool and radio_sshd_hardening.changed
+
+    - name: Configure fail2ban for SSH
+      ansible.builtin.copy:
+        dest: /etc/fail2ban/jail.d/radio-sshd.local
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [sshd]
+          enabled = true
+          bantime = 15m
+          findtime = 10m
+          maxretry = 6
+      when: radio_install_fail2ban | bool
+
+    - name: Enable fail2ban
+      ansible.builtin.systemd:
+        name: fail2ban
+        enabled: true
+        state: restarted
+      when: radio_install_fail2ban | bool
+
     - name: Allow required TCP ports in UFW
       ansible.builtin.command: "ufw allow {{ item }}/tcp"
       loop: "{{ radio_firewall_tcp_ports }}"
@@ -156,6 +242,13 @@
       changed_when: false
       when: radio_manage_firewall | bool
 
+    - name: Stop legacy host nginx if present
+      ansible.builtin.systemd:
+        name: nginx
+        enabled: false
+        state: stopped
+      failed_when: false
+
     - name: Check k3s binary
       ansible.builtin.stat:
         path: /usr/local/bin/k3s
@@ -166,14 +259,14 @@
         url: https://get.k3s.io
         dest: /tmp/install-k3s.sh
         mode: "0755"
-      when: not radio_k3s_binary.stat.exists
+      when: not radio_k3s_binary.stat.exists or radio_k3s_reconfigure | bool
 
-    - name: Install k3s
+    - name: Install or reconfigure k3s
       ansible.builtin.command: /tmp/install-k3s.sh
       environment:
         INSTALL_K3S_CHANNEL: "{{ k3s_channel }}"
         INSTALL_K3S_EXEC: "{{ k3s_exec }}"
-      when: not radio_k3s_binary.stat.exists
+      when: not radio_k3s_binary.stat.exists or radio_k3s_reconfigure | bool
 
     - name: Ensure k3s is running
       ansible.builtin.systemd:
@@ -189,6 +282,34 @@
       until: radio_kubectl_nodes.rc == 0
       changed_when: false
 
+    - name: Install cert-manager
+      ansible.builtin.command: "k3s kubectl apply -f {{ radio_cert_manager_manifest_url }}"
+      register: radio_cert_manager_apply
+      changed_when: >-
+        'created' in radio_cert_manager_apply.stdout or
+        'configured' in radio_cert_manager_apply.stdout
+
+    - name: Wait for cert-manager controller
+      ansible.builtin.command: >-
+        k3s kubectl -n cert-manager rollout status deployment/{{ item }} --timeout=180s
+      loop:
+        - cert-manager
+        - cert-manager-cainjector
+        - cert-manager-webhook
+      changed_when: false
+
+    - name: Install ingress-nginx controller
+      ansible.builtin.command: "k3s kubectl apply -f {{ radio_ingress_nginx_manifest_url }}"
+      register: radio_ingress_nginx_apply
+      changed_when: >-
+        'created' in radio_ingress_nginx_apply.stdout or
+        'configured' in radio_ingress_nginx_apply.stdout
+
+    - name: Wait for ingress-nginx controller
+      ansible.builtin.command: >-
+        k3s kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
+      changed_when: false
+
     - name: Give radio user kubectl access on the VPS
       ansible.builtin.file:
         path: "/home/{{ radio_user }}/.kube"
@@ -196,6 +317,7 @@
         owner: "{{ radio_user }}"
         group: "{{ radio_user }}"
         mode: "0700"
+      when: radio_install_kubeconfig | bool
 
     - name: Copy k3s kubeconfig for radio user
       ansible.builtin.copy:
@@ -205,6 +327,13 @@
         owner: "{{ radio_user }}"
         group: "{{ radio_user }}"
         mode: "0600"
+      when: radio_install_kubeconfig | bool
+
+    - name: Remove cluster-admin kubeconfig from radio user by default
+      ansible.builtin.file:
+        path: "/home/{{ radio_user }}/.kube/config"
+        state: absent
+      when: not radio_install_kubeconfig | bool
 
     - name: Create application directory
       ansible.builtin.file:
@@ -254,6 +383,22 @@
           }}@postgres:5432/{{ radio_postgres_db }}
       no_log: true
 
+    - name: Write cert-manager Issuer manifest on the VPS
+      ansible.builtin.template:
+        src: templates/radio-issuer.yaml.j2
+        dest: "{{ radio_issuer_manifest }}"
+        owner: "{{ radio_user }}"
+        group: "{{ radio_user }}"
+        mode: "0644"
+
+    - name: Write public Ingress manifest on the VPS
+      ansible.builtin.template:
+        src: templates/radio-ingress.yaml.j2
+        dest: "{{ radio_ingress_manifest }}"
+        owner: "{{ radio_user }}"
+        group: "{{ radio_user }}"
+        mode: "0644"
+
     - name: Build application image on the VPS
       ansible.builtin.command: "docker build -t {{ radio_image }} -f docker/app/Dockerfile ."
       args:
@@ -289,6 +434,6 @@
     - name: Show public URL and useful commands
       ansible.builtin.debug:
         msg:
-          - "Radio URL: http://{{ ansible_host | default(inventory_hostname) }}:{{ radio_nodeport }}"
-          - "Status: ssh {{ radio_user }}@HOST 'kubectl -n radio get pods,svc'"
+          - "Radio URL: https://{{ radio_domain }}"
+          - "Status: ssh root@HOST 'k3s kubectl -n radio get pods,svc'"
           - "Admin token file: {{ radio_generated_dir }}/admin_token unless RADIO_ADMIN_TOKEN was set."

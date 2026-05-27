@@ -20,7 +20,7 @@ ci-local:
 
 .PHONY: k8s-status
 k8s-status:
-	kubectl -n radio get pods,svc,job,cronjob,pvc
+	kubectl -n radio get pods,svc,ingress,certificate,job,cronjob,pvc
 
 .PHONY: k8s-db
 k8s-db:

@@ -1,6 +1,0 @@
----
-wg_packages:
-  - wireguard
-  - wireguard-tools
-  - qrencode
-  - nftables

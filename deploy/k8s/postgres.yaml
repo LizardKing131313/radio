@@ -25,6 +25,9 @@ spec:
       labels:
         app.kubernetes.io/name: postgres
     spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         # Minimal single-node Postgres. Move to an operator when backup/HA
         # requirements justify the extra CRDs and controller.

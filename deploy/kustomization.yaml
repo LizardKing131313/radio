@@ -11,6 +11,9 @@ resources:
   - k8s/postgres-backup.yaml
   - k8s/alembic-job.yaml
   - k8s/app.yaml
+  - k8s/issuer.yaml
+  - k8s/ingress.yaml
+  - k8s/network-policy.yaml
 
 configMapGenerator:
   # Статический runtime-конфиг собирается здесь: для деплоя хватает `kubectl apply -k deploy`.

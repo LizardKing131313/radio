@@ -1,0 +1,15 @@
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: radio-letsencrypt
+spec:
+  acme:
+    email: admin@example.com
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: radio-letsencrypt-account
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: nginx
