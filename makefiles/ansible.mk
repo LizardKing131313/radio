@@ -102,7 +102,7 @@ ansible.vault.add: ## Добавить строковый секрет: KEY=var_
 	@$(ACTIVATE); ansible-vault encrypt_string '$(VALUE)' --name '$(KEY)' >> "$(FILE)"
 
 # ===== Примеры =====
-# make ansible.run LIMIT='-l vps1'
+# make ansible.run LIMIT='-l vps_edge'
 # make ansible.check EXTRA_VARS='-e app_env=prod'
 # make ansible.vault.add KEY=youtube_api_key VALUE='AIza...'
 # make ansible.ssh HOST=1.2.3.4 USER=root

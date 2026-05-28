@@ -6,12 +6,34 @@
 pod `radio`, а внутри него отдельные контейнеры для узлов пайплайна:
 
 ```text
-Internet -> ingress-nginx -> Service radio -> pod nginx
+Internet -> Russian edge nginx -> origin ingress-nginx -> Service radio -> pod nginx
 
 search -> PostgreSQL -> prefetch -> cache PVC -> Liquidsoap -> FIFO -> FFmpeg -> HLS -> Nginx
                     queue-player -> Liquidsoap request.queue
                               API -> Nginx /api/
 ```
+
+Production-вход состоит из двух уровней, если включен российский VPS:
+
+```text
+listeners
+  |
+  | https://RADIO_EDGE_DOMAIN
+  v
+Russian VPS: host nginx + Let's Encrypt + short HLS segment cache
+  |
+  | https://RADIO_EDGE_ORIGIN_HOST, Host: RADIO_EDGE_ORIGIN_HOST
+  v
+Foreign VPS: ingress-nginx + cert-manager inside k3s
+  |
+  v
+ClusterIP Service radio -> pod nginx -> /hls and /api
+```
+
+Так edge можно держать в России для публичной раздачи и быстрого HLS, а origin
+оставить чистым Kubernetes-хостом. Для нормального TLS нужны два DNS-имени:
+`RADIO_EDGE_DOMAIN` смотрит на российский VPS, `RADIO_DOMAIN`/`RADIO_EDGE_ORIGIN_HOST`
+смотрит на иностранный VPS.
 
 1. `alembic` Job применяет миграции из `alembic/versions`.
    Python не создает и не мигрирует таблицы, он только проверяет, что схема уже
@@ -124,16 +146,19 @@ kubectl kustomize deploy
 
 ## Где слушать
 
-В production публичный вход идет через ingress-nginx и cert-manager:
+В production публичный вход идет через российский edge nginx, если группа
+`vps_edge` включена, иначе напрямую через ingress-nginx и cert-manager:
 
 ```text
-https://RADIO_DOMAIN/hls/mp4/playlist.m3u8
-https://RADIO_DOMAIN/api/health
-https://RADIO_DOMAIN/api/current
-https://RADIO_DOMAIN/api/metrics
-https://RADIO_DOMAIN/api/metrics/prometheus
-https://RADIO_DOMAIN/api/admin
+https://RADIO_EDGE_DOMAIN/hls/mp4/playlist.m3u8
+https://RADIO_EDGE_DOMAIN/api/health
+https://RADIO_EDGE_DOMAIN/api/current
+https://RADIO_EDGE_DOMAIN/api/metrics
+https://RADIO_EDGE_DOMAIN/api/metrics/prometheus
+https://RADIO_EDGE_DOMAIN/api/admin
 ```
+
+Без edge используй те же пути на `RADIO_DOMAIN`.
 
 Для локальной проверки без DNS можно сделать port-forward во внутренний Service:
 

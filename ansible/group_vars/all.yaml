@@ -32,6 +32,16 @@ radio_acme_server: >-
      if radio_tls_staging | bool
      else 'https://acme-v02.api.letsencrypt.org/directory' }}
 
+# Optional Russian edge VPS: public nginx proxy in front of the origin VPS.
+radio_edge_domain: "{{ lookup('ansible.builtin.env', 'RADIO_EDGE_DOMAIN') }}"
+radio_edge_tls_email: >-
+  {{ lookup('ansible.builtin.env', 'RADIO_EDGE_TLS_EMAIL') | default(radio_tls_email, true) }}
+radio_edge_tls_staging: "{{ radio_tls_staging }}"
+radio_edge_origin_host: >-
+  {{ lookup('ansible.builtin.env', 'RADIO_EDGE_ORIGIN_HOST') | default(radio_domain, true) }}
+radio_edge_origin_url: "{{ lookup('ansible.builtin.env', 'RADIO_EDGE_ORIGIN_URL') }}"
+radio_edge_hls_cache_size: 2g
+
 # Secrets: YouTube key is required. Password/token are generated into
 # ansible/.generated/ if env vars are not provided.
 radio_postgres_db: radio
@@ -40,7 +50,7 @@ radio_postgres_password: "{{ lookup('ansible.builtin.env', 'RADIO_POSTGRES_PASSW
 radio_youtube_api_key: "{{ lookup('ansible.builtin.env', 'RADIO_YOUTUBE_API_KEY') }}"
 radio_admin_token: "{{ lookup('ansible.builtin.env', 'RADIO_ADMIN_TOKEN') }}"
 
-# Minimal firewall: SSH + public HTTP/HTTPS handled by ingress-nginx.
+# Minimal firewall: SSH + public HTTP/HTTPS for origin ingress-nginx or edge nginx.
 ssh_port: 22
 radio_manage_firewall: true
 radio_harden_ssh: true

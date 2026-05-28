@@ -1,6 +1,6 @@
 ---
-- name: Bootstrap Python on a clean Debian/Ubuntu VPS
-  hosts: vps_root
+- name: Bootstrap Python on clean Debian/Ubuntu VPS hosts
+  hosts: vps_root:vps_edge
   gather_facts: false
   become: false
   tasks:
@@ -437,3 +437,283 @@
           - "Radio URL: https://{{ radio_domain }}"
           - "Status: ssh root@HOST 'k3s kubectl -n radio get pods,svc'"
           - "Admin token file: {{ radio_generated_dir }}/admin_token unless RADIO_ADMIN_TOKEN was set."
+
+- name: Configure Russian edge nginx proxy
+  hosts: vps_edge
+  gather_facts: true
+  become: true
+  vars:
+    radio_edge_acme_webroot: /var/lib/radio-edge/acme
+    radio_edge_nginx_conf: /etc/nginx/conf.d/radio-edge.conf
+  tasks:
+    - name: Resolve edge proxy settings
+      ansible.builtin.set_fact:
+        radio_edge_effective_domain: "{{ radio_edge_domain | default('', true) | trim }}"
+        radio_edge_effective_tls_email: "{{ radio_edge_tls_email | default('', true) | trim }}"
+        radio_edge_effective_origin_host: "{{ radio_edge_origin_host | default('', true) | trim }}"
+
+    - name: Resolve edge origin URL
+      ansible.builtin.set_fact:
+        radio_edge_effective_origin_url: >-
+          {{
+            (radio_edge_origin_url | default('', true) | trim | regex_replace('/+$', ''))
+            if ((radio_edge_origin_url | default('', true) | trim | length) > 0)
+            else ('https://' ~ radio_edge_effective_origin_host)
+          }}
+
+    - name: Fail early on unsupported OS or missing edge settings
+      ansible.builtin.assert:
+        that:
+          - ansible_os_family == "Debian"
+          - radio_edge_effective_domain | length > 0
+          - radio_edge_effective_tls_email | length > 0
+          - radio_edge_effective_origin_host | length > 0
+          - radio_edge_effective_origin_url | regex_search('^https://[^/]+(:[0-9]+)?$')
+        fail_msg: >-
+          Set RADIO_EDGE_DOMAIN and RADIO_EDGE_TLS_EMAIL. Set RADIO_EDGE_ORIGIN_HOST
+          or RADIO_EDGE_ORIGIN_URL when RADIO_DOMAIN is not the origin host.
+
+    - name: Install edge packages
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - certbot
+          - nginx
+          - python3
+          - python3-apt
+          - ufw
+        state: present
+        update_cache: true
+
+    - name: Install fail2ban when SSH jail is enabled
+      ansible.builtin.apt:
+        name: fail2ban
+        state: present
+      when: radio_install_fail2ban | bool
+
+    - name: Read SSH public keys from controller files for edge
+      ansible.builtin.set_fact:
+        radio_edge_keys_from_files: >-
+          {{
+            radio_edge_keys_from_files | default([]) +
+            [lookup('ansible.builtin.file', item, errors='ignore') | trim]
+          }}
+      loop: "{{ radio_authorized_key_files }}"
+      delegate_to: localhost
+      become: false
+
+    - name: Merge SSH public keys for edge
+      ansible.builtin.set_fact:
+        radio_edge_effective_authorized_keys: >-
+          {{ (radio_authorized_keys + (radio_edge_keys_from_files | default([]))) | reject('equalto', '') | list }}
+
+    - name: Refuse edge SSH hardening without public keys
+      ansible.builtin.assert:
+        that:
+          - radio_edge_effective_authorized_keys | length > 0
+        fail_msg: "Set radio_authorized_key_files/radio_authorized_keys before disabling SSH password login."
+      when: radio_harden_ssh | bool
+
+    - name: Install SSH keys for root on edge before password login is disabled
+      ansible.posix.authorized_key:
+        user: root
+        key: "{{ item }}"
+        state: present
+      loop: "{{ radio_edge_effective_authorized_keys }}"
+      when: radio_harden_ssh | bool
+
+    - name: Ensure SSH include directory exists on edge
+      ansible.builtin.file:
+        path: /etc/ssh/sshd_config.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: radio_harden_ssh | bool
+
+    - name: Harden SSH password login on edge
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/99-radio-hardening.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          PubkeyAuthentication yes
+          PermitRootLogin prohibit-password
+          X11Forwarding no
+      register: radio_edge_sshd_hardening
+      when: radio_harden_ssh | bool
+
+    - name: Validate SSH configuration on edge
+      ansible.builtin.command: /usr/sbin/sshd -t
+      changed_when: false
+      when: radio_harden_ssh | bool
+
+    - name: Reload SSH after edge hardening
+      ansible.builtin.systemd:
+        name: ssh
+        state: reloaded
+      when: radio_harden_ssh | bool and radio_edge_sshd_hardening.changed
+
+    - name: Create ACME webroot
+      ansible.builtin.file:
+        path: "{{ radio_edge_acme_webroot }}"
+        state: directory
+        owner: root
+        group: www-data
+        mode: "0755"
+
+    - name: Create HLS proxy cache directory
+      ansible.builtin.file:
+        path: /var/cache/nginx/radio-hls
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: "0750"
+
+    - name: Remove default nginx site
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      register: radio_edge_default_site
+
+    - name: Allow required TCP ports in UFW on edge
+      ansible.builtin.command: "ufw allow {{ item }}/tcp"
+      loop: "{{ radio_firewall_tcp_ports }}"
+      changed_when: false
+      when: radio_manage_firewall | bool
+
+    - name: Enable UFW on edge
+      ansible.builtin.command: ufw --force enable
+      changed_when: false
+      when: radio_manage_firewall | bool
+
+    - name: Check existing edge certificate
+      ansible.builtin.stat:
+        path: "/etc/letsencrypt/live/{{ radio_edge_effective_domain }}/fullchain.pem"
+      register: radio_edge_certificate
+
+    - name: Install HTTP-only nginx config for first certificate issue
+      ansible.builtin.copy:
+        dest: "{{ radio_edge_nginx_conf }}"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          server {
+              listen 80;
+              listen [::]:80;
+              server_name {{ radio_edge_effective_domain }};
+
+              location ^~ /.well-known/acme-challenge/ {
+                  root {{ radio_edge_acme_webroot }};
+                  default_type text/plain;
+              }
+
+              location / {
+                  return 200 "radio edge bootstrap\n";
+              }
+          }
+      when: not radio_edge_certificate.stat.exists
+
+    - name: Validate bootstrap nginx config
+      ansible.builtin.command: nginx -t
+      changed_when: false
+      when: not radio_edge_certificate.stat.exists
+
+    - name: Start nginx for ACME HTTP-01 challenge
+      ansible.builtin.systemd:
+        name: nginx
+        enabled: true
+        state: started
+      when: not radio_edge_certificate.stat.exists
+
+    - name: Issue edge Let's Encrypt certificate
+      ansible.builtin.command: >-
+        certbot certonly
+        --webroot
+        --webroot-path {{ radio_edge_acme_webroot }}
+        --domain {{ radio_edge_effective_domain }}
+        --email {{ radio_edge_effective_tls_email }}
+        --agree-tos
+        --non-interactive
+        --no-eff-email
+        --keep-until-expiring
+        {{ '--test-cert' if radio_edge_tls_staging | bool else '' }}
+      args:
+        creates: "/etc/letsencrypt/live/{{ radio_edge_effective_domain }}/fullchain.pem"
+      register: radio_edge_certbot
+
+    - name: Write production edge nginx config
+      ansible.builtin.template:
+        src: templates/radio-edge-nginx.conf.j2
+        dest: "{{ radio_edge_nginx_conf }}"
+        owner: root
+        group: root
+        mode: "0644"
+      register: radio_edge_nginx_template
+
+    - name: Install nginx reload hook for renewed certificates
+      ansible.builtin.copy:
+        dest: /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
+        owner: root
+        group: root
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          set -e
+          systemctl reload nginx
+
+    - name: Enable certbot renewal timer
+      ansible.builtin.systemd:
+        name: certbot.timer
+        enabled: true
+        state: started
+
+    - name: Configure fail2ban for SSH on edge
+      ansible.builtin.copy:
+        dest: /etc/fail2ban/jail.d/radio-sshd.local
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [sshd]
+          enabled = true
+          bantime = 15m
+          findtime = 10m
+          maxretry = 6
+      when: radio_install_fail2ban | bool
+
+    - name: Enable fail2ban on edge
+      ansible.builtin.systemd:
+        name: fail2ban
+        enabled: true
+        state: restarted
+      when: radio_install_fail2ban | bool
+
+    - name: Validate production edge nginx config
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    - name: Ensure edge nginx is enabled and running
+      ansible.builtin.systemd:
+        name: nginx
+        enabled: true
+        state: started
+
+    - name: Reload edge nginx after config or certificate changes
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded
+      when: >-
+        radio_edge_nginx_template.changed or
+        radio_edge_default_site.changed or
+        (radio_edge_certbot is defined and radio_edge_certbot.changed)
+
+    - name: Show edge URL and origin
+      ansible.builtin.debug:
+        msg:
+          - "Edge URL: https://{{ radio_edge_effective_domain }}"
+          - "Origin: {{ radio_edge_effective_origin_url }} with Host {{ radio_edge_effective_origin_host }}"
