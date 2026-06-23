@@ -17,11 +17,26 @@
   gather_facts: true
   become: true
   vars:
+    radio_local_vars_file: "{{ playbook_dir }}/local-vars.yml"
     radio_generated_dir: "{{ playbook_dir }}/.generated"
     radio_secret_manifest: "{{ radio_app_dir }}/deploy/k8s/secret.yaml"
     radio_issuer_manifest: "{{ radio_app_dir }}/deploy/k8s/issuer.yaml"
     radio_ingress_manifest: "{{ radio_app_dir }}/deploy/k8s/ingress.yaml"
   tasks:
+    - name: Check local vars file
+      ansible.builtin.stat:
+        path: "{{ radio_local_vars_file }}"
+      delegate_to: localhost
+      become: false
+      register: radio_local_vars_file_stat
+
+    - name: Load local vars file
+      ansible.builtin.include_vars:
+        file: "{{ radio_local_vars_file }}"
+      become: false
+      no_log: true
+      when: radio_local_vars_file_stat.stat.exists
+
     - name: Fail early on unsupported OS
       ansible.builtin.assert:
         that:
@@ -443,9 +458,24 @@
   gather_facts: true
   become: true
   vars:
+    radio_local_vars_file: "{{ playbook_dir }}/local-vars.yml"
     radio_edge_acme_webroot: /var/lib/radio-edge/acme
     radio_edge_nginx_conf: /etc/nginx/conf.d/radio-edge.conf
   tasks:
+    - name: Check local vars file
+      ansible.builtin.stat:
+        path: "{{ radio_local_vars_file }}"
+      delegate_to: localhost
+      become: false
+      register: radio_local_vars_file_stat
+
+    - name: Load local vars file
+      ansible.builtin.include_vars:
+        file: "{{ radio_local_vars_file }}"
+      become: false
+      no_log: true
+      when: radio_local_vars_file_stat.stat.exists
+
     - name: Resolve edge proxy settings
       ansible.builtin.set_fact:
         radio_edge_effective_domain: "{{ radio_edge_domain | default('', true) | trim }}"

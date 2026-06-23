@@ -16,25 +16,30 @@ cp ansible/inventory/hosts.example.yml ansible/inventory/hosts.local.yml
 алиас Ansible, на DNS оно не влияет.
 
 Перед запуском нужны YouTube API key, домен с A/AAAA-записью на VPS, email для Let's Encrypt
-и публичный SSH-ключ в `radio_authorized_key_files` или `radio_authorized_keys`:
+и публичный SSH-ключ в `radio_authorized_key_files` или `radio_authorized_keys`.
+Секреты удобнее держать в локальном ignored-файле:
 
 ```bash
-export RADIO_YOUTUBE_API_KEY='...'
-export RADIO_DOMAIN='origin-radio.example.com'
-export RADIO_TLS_EMAIL='admin@example.com'
+cp ansible/local-vars.example.yml ansible/local-vars.yml
 ```
+
+В `ansible/local-vars.yml` заполни:
+
+```yaml
+radio_tls_email: admin@example.com
+radio_youtube_api_key: ...
+```
+
+`RADIO_DOMAIN` и edge-домены можно задавать в inventory. В активном
+`ansible/inventory/hosts.yml` origin сейчас `govnovoz-fm.fun`, edge proxy -
+`ru.govnovoz-fm.fun`.
 
 Для схемы с российским edge нужен отдельный публичный домен edge, который смотрит на
 российский VPS. Origin-домен должен смотреть на иностранный VPS, потому что по нему
 работают ingress-nginx и cert-manager внутри k3s:
 
-```bash
-export RADIO_EDGE_DOMAIN='radio.example.com'
-export RADIO_EDGE_TLS_EMAIL="$RADIO_TLS_EMAIL"
-# Обычно не нужно: по умолчанию edge ходит на https://$RADIO_DOMAIN
-export RADIO_EDGE_ORIGIN_HOST="$RADIO_DOMAIN"
-export RADIO_EDGE_ORIGIN_URL="https://$RADIO_DOMAIN"
-```
+Обычно для edge уже достаточно inventory-переменных `radio_edge_domain`,
+`radio_edge_origin_host` и `radio_edge_origin_url`.
 
 `RADIO_POSTGRES_PASSWORD` и `RADIO_ADMIN_TOKEN` можно не задавать. Тогда Ansible создаст их локально в
 `ansible/.generated/`, эта директория игнорируется git.

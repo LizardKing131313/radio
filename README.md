@@ -30,20 +30,3 @@ Runtime details: [docs/runtime.md](docs/runtime.md).
 
 Single VPS provisioning is handled by Ansible: [ansible/README.md](ansible/README.md).
 It installs Docker + k3s, creates the `radio` user, builds the image on the VPS and applies `deploy/`.
-
-## Local CI
-
-GitHub CI can be reproduced locally from PowerShell:
-
-```powershell
-.\scripts\ci-local.ps1
-```
-
-Useful shorter runs:
-
-```powershell
-.\scripts\ci-local.ps1 -PythonOnly
-.\scripts\ci-local.ps1 -MetaOnly
-.\scripts\ci-local.ps1 -PostgresOnly
-.\scripts\ci-local.ps1 -SkipPostgres
-```

@@ -1,10 +1,15 @@
+# ---- Shared paths ------------------------------------------------------------
+MAKEFILES_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+ROOT_DIR      := $(abspath $(MAKEFILES_DIR)/..)
+VENV_DIR      ?= $(ROOT_DIR)/.venv
+
 # ---- OS-aware venv layout ----------------------------------------------------
 ifeq ($(OS),Windows_NT)
-VENV_BIN := .venv/Scripts
+VENV_BIN := $(VENV_DIR)/Scripts
 PY       := python
 NULLDEV  := NUL
 else
-VENV_BIN := .venv/bin
+VENV_BIN := $(VENV_DIR)/bin
 PY       := python3
 NULLDEV  := /dev/null
 endif

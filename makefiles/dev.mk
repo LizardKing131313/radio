@@ -1,3 +1,5 @@
+include $(dir $(lastword $(MAKEFILE_LIST)))common.mk
+
 # ---- Helpers -----------------------------------------------------------------
 .PHONY: help-dev
 help-dev:
@@ -14,33 +16,33 @@ help-dev:
 # ---- DEV ---------------------------------------------------------------------
 .PHONY: lint
 lint:
-	$(RUFF) check .
-	$(BLACK) --check .
+	cd "$(ROOT_DIR)" && "$(RUFF)" check .
+	cd "$(ROOT_DIR)" && "$(BLACK)" --check .
 
 .PHONY: format
 format:
-	$(RUFF) check . --fix
-	$(BLACK) .
+	cd "$(ROOT_DIR)" && "$(RUFF)" check . --fix
+	cd "$(ROOT_DIR)" && "$(BLACK)" .
 
 .PHONY: typecheck
 typecheck:
-	$(MYPY) .
+	cd "$(ROOT_DIR)" && "$(MYPY)" .
 
 .PHONY: test
 test:
-	$(PYTEST) --maxfail=1 -q --disable-warnings
+	cd "$(ROOT_DIR)" && "$(PYTEST)" --maxfail=1 -q --disable-warnings
 
 .PHONY: test-all
 test-all:
-	$(PYTEST) -q --disable-warnings
+	cd "$(ROOT_DIR)" && "$(PYTEST)" -q --disable-warnings
 
 .PHONY: coverage
 coverage:
-	$(PYTEST) -q --disable-warnings --cov=. --cov-report=term-missing --cov-report=xml --cov-report=html
+	cd "$(ROOT_DIR)" && "$(PYTEST)" -q --disable-warnings --cov=. --cov-report=term-missing --cov-report=xml --cov-report=html
 
 .PHONY: coverage-badge
 coverage-badge:
-	$(PYTHON) scripts/badge/gen_badge.py
+	cd "$(ROOT_DIR)" && "$(PYTHON)" scripts/badge/gen_badge.py
 
 .PHONY: ci
 ci: lint test

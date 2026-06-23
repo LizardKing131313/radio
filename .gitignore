@@ -39,6 +39,7 @@ NUL
 .vault_pass.txt
 hosts.local.ini
 hosts.local.yml
+ansible/local-vars.yml
 ansible/.generated/
 
 search/_ydl/

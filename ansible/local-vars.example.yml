@@ -1,0 +1,8 @@
+---
+# Copy to ansible/local-vars.yml. The real file is ignored by git.
+radio_tls_email: admin@example.com
+radio_youtube_api_key: change-me
+
+# Optional: leave empty to let Ansible generate them in ansible/.generated/.
+radio_postgres_password: ""
+radio_admin_token: ""

@@ -74,5 +74,6 @@ radio_rsync_excludes:
   - "--exclude=qodana"
   - "--exclude=radio_manager.egg-info"
   - "--exclude=test-results"
+  - "--exclude=ansible/local-vars.yml"
   - "--exclude=deploy/k8s/secret.yaml"
   - "--exclude=ansible/.generated"

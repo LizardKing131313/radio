@@ -1,3 +1,5 @@
+include $(dir $(lastword $(MAKEFILE_LIST)))common.mk
+
 # ---- Helpers -----------------------------------------------------------------
 .PHONY: help-setup
 help-setup:
@@ -18,13 +20,14 @@ help-setup:
 	@echo "  clean-venv      - remove .venv"
 
 # ---- Venv --------------------------------------------------------------------
-.venv:  ## stamp-dir to mark venv
-	$(PY) -m venv .venv
-	@mkdir -p .venv 2>$(NULLDEV) || true
-	@echo "ok" > .venv/.stamp
+VENV_STAMP := $(VENV_DIR)/.stamp
+
+$(VENV_STAMP):  ## stamp-dir to mark venv
+	$(PY) -m venv "$(VENV_DIR)"
+	@echo "ok" > "$(VENV_STAMP)"
 
 .PHONY: venv
-venv: .venv
+venv: $(VENV_STAMP)
 
 .PHONY: upgrade-pip
 upgrade-pip: venv
@@ -39,32 +42,32 @@ pip-tools: upgrade-pip
 .PHONY: setup
 setup: venv upgrade-pip pip-tools
 	# editable install if project uses pyproject/setuptools
-	@if [ -f pyproject.toml ] || [ -f setup.cfg ] || [ -f setup.py ]; then \
-		$(PIP) install -e ".[dev]" ; \
+	@if [ -f "$(ROOT_DIR)/pyproject.toml" ] || [ -f "$(ROOT_DIR)/setup.cfg" ] || [ -f "$(ROOT_DIR)/setup.py" ]; then \
+		$(PIP) install -e "$(ROOT_DIR)[dev]" ; \
 	else \
 		echo "No build metadata found (pyproject.toml/setup.cfg); skipping editable install"; \
 	fi
 	# pre-commit
 	$(PIP) install -U pre-commit
-	$(MAKE) hooks
+	$(MAKE) -f "$(ROOT_DIR)/makefiles/setup.mk" -C "$(ROOT_DIR)" hooks
 
 .PHONY: hooks
 hooks:
-	$(VENV_BIN)/pre-commit clean
-	$(VENV_BIN)/pre-commit install
+	cd "$(ROOT_DIR)" && "$(VENV_BIN)/pre-commit" clean
+	cd "$(ROOT_DIR)" && "$(VENV_BIN)/pre-commit" install
 
 # ---- Compile requirements ----------------------------------------------------
 .PHONY: compile
 compile: pip-tools
-	$(PIP_COMPILE) pyproject.toml -o requirements.txt
+	$(PIP_COMPILE) "$(ROOT_DIR)/pyproject.toml" -o "$(ROOT_DIR)/requirements.txt"
 
 .PHONY: compile-dev
 compile-dev: pip-tools
-	$(PIP_COMPILE) pyproject.toml --extra dev -o requirements-dev.txt
+	$(PIP_COMPILE) "$(ROOT_DIR)/pyproject.toml" --extra dev -o "$(ROOT_DIR)/requirements-dev.txt"
 
 .PHONY: compile-all
 compile-all: pip-tools
-	$(PIP_COMPILE) pyproject.toml --extra dev -o requirements-all.txt
+	$(PIP_COMPILE) "$(ROOT_DIR)/pyproject.toml" --extra dev -o "$(ROOT_DIR)/requirements-all.txt"
 
 .PHONY: compile-every
 compile-every: compile compile-dev compile-all
@@ -72,29 +75,29 @@ compile-every: compile compile-dev compile-all
 # ---- Compile requirements update ---------------------------------------------
 .PHONY: compile-update
 compile-update: compile-every
-	$(PIP_COMPILE) -U pyproject.toml -o requirements.txt
-	$(PIP_COMPILE) -U pyproject.toml --extra dev -o requirements-dev.txt
-	$(PIP_COMPILE) -U pyproject.toml --extra dev -o requirements-all.txt
+	$(PIP_COMPILE) -U "$(ROOT_DIR)/pyproject.toml" -o "$(ROOT_DIR)/requirements.txt"
+	$(PIP_COMPILE) -U "$(ROOT_DIR)/pyproject.toml" --extra dev -o "$(ROOT_DIR)/requirements-dev.txt"
+	$(PIP_COMPILE) -U "$(ROOT_DIR)/pyproject.toml" --extra dev -o "$(ROOT_DIR)/requirements-all.txt"
 
 # ---- Sync (precise env) ------------------------------------------------------
 .PHONY: sync
 sync: pip-tools
-	$(PIP_SYNC) requirements.txt
+	$(PIP_SYNC) "$(ROOT_DIR)/requirements.txt"
 
 .PHONY: sync-dev
 sync-dev: pip-tools
-	$(PIP_SYNC) requirements-dev.txt
+	$(PIP_SYNC) "$(ROOT_DIR)/requirements-dev.txt"
 
 .PHONY: sync-all
 sync-all: pip-tools
-	$(PIP_SYNC) requirements-all.txt
+	$(PIP_SYNC) "$(ROOT_DIR)/requirements-all.txt"
 
 # ---- Clean -------------------------------------------------------------------
 .PHONY: clean-venv
 clean-venv:
 	@echo "Removing .venv ..."
 ifeq ($(OS),Windows_NT)
-	@if exist .venv rmdir /S /Q .venv
+	@if exist "$(VENV_DIR)" rmdir /S /Q "$(VENV_DIR)"
 else
-	@rm -rf .venv
+	@rm -rf "$(VENV_DIR)"
 endif

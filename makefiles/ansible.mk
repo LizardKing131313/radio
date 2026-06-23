@@ -1,3 +1,4 @@
+include $(dir $(lastword $(MAKEFILE_LIST)))common.mk
 # ===== Ansible Makefile fragment =====
 # Использование: под WSL запускай `make -f Makefile` в корне проекта,
 # предварительно подключив этот файл: `include makefiles/ansible.mk`
@@ -6,20 +7,20 @@ SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -c
 
 # --- Настройки по умолчанию (можно переопределять в верхнем Makefile или через CLI) ---
-VENV           ?= .venv-wsl
+VENV           ?= $(ROOT_DIR)/.venv-wsl
 PYTHON_BIN     ?= python3
 PIP_BIN        ?= pip
-PLAYBOOK       ?= ansible/site.yml
-INVENTORY      ?= ansible/inventory/hosts.yml
-GALAXY_REQ     ?= ansible/requirements.yml
-ANSIBLE_CFG    ?= ansible/ansible.cfg
-VAULT_FILE     ?= ansible/group_vars/all/vault.yml
+PLAYBOOK       ?= $(ROOT_DIR)/ansible/site.yml
+INVENTORY      ?= $(ROOT_DIR)/ansible/inventory/hosts.yml
+GALAXY_REQ     ?= $(ROOT_DIR)/ansible/requirements.yml
+ANSIBLE_CFG    ?= $(ROOT_DIR)/ansible/ansible.cfg
+VAULT_FILE     ?= $(ROOT_DIR)/ansible/group_vars/all/vault.yml
 
 # --- Вспомогательные шорткаты ---
 ACTIVATE := source $(VENV)/bin/activate
-AI := ANSIBLE_CONFIG=$(ANSIBLE_CFG) ansible
-AIPB := ANSIBLE_CONFIG=$(ANSIBLE_CFG) ansible-playbook
-AIG := ANSIBLE_CONFIG=$(ANSIBLE_CFG) ansible-galaxy
+AI := ANSIBLE_CONFIG="$(ANSIBLE_CFG)" ansible
+AIPB := ANSIBLE_CONFIG="$(ANSIBLE_CFG)" ansible-playbook
+AIG := ANSIBLE_CONFIG="$(ANSIBLE_CFG)" ansible-galaxy
 
 # ===== HELP =====
 help-ansible: ## Показать хелп по целям Ansible
@@ -34,42 +35,42 @@ ansible.init: ## Установить базовые пакеты (apt), соз�
 	@echo "==> Python venv: $(VENV)"
 	@if [[ ! -d "$(VENV)" ]]; then $(PYTHON_BIN) -m venv "$(VENV)"; fi
 	@echo "==> pip upgrade & install ansible"
-	@$(ACTIVATE); $(PYTHON_BIN) -m $(PIP_BIN) install --upgrade pip
-	@$(ACTIVATE); $(PYTHON_BIN) -m $(PIP_BIN) install --upgrade ansible ansible-lint
-	@$(ACTIVATE); $(AI) --version || true
+	@cd "$(ROOT_DIR)" && $(ACTIVATE); $(PYTHON_BIN) -m $(PIP_BIN) install --upgrade pip
+	@cd "$(ROOT_DIR)" && $(ACTIVATE); $(PYTHON_BIN) -m $(PIP_BIN) install --upgrade ansible ansible-lint
+	@cd "$(ROOT_DIR)" && $(ACTIVATE); $(AI) --version || true
 	@echo "==> Done."
 
 ansible.upgrade: ## Обновить ansible и ansible-lint в venv
-	@$(ACTIVATE); $(PYTHON_BIN) -m $(PIP_BIN) install --upgrade ansible ansible-lint
-	@$(ACTIVATE); $(AI) --version
+	@cd "$(ROOT_DIR)" && $(ACTIVATE); $(PYTHON_BIN) -m $(PIP_BIN) install --upgrade ansible ansible-lint
+	@cd "$(ROOT_DIR)" && $(ACTIVATE); $(AI) --version
 
 # ===== Galaxy =====
 ansible.galaxy: ## Установить коллекции из ansible/requirements.yml (если файл существует)
 	@if [[ -f "$(GALAXY_REQ)" ]]; then \
 		echo "==> Installing Galaxy collections from $(GALAXY_REQ)"; \
-		$(ACTIVATE); $(AIG) collection install -r "$(GALAXY_REQ)"; \
+		cd "$(ROOT_DIR)" && $(ACTIVATE); $(AIG) collection install -r "$(GALAXY_REQ)"; \
 	else \
 		echo "==> $(GALAXY_REQ) not found. Skip."; \
 	fi
 
 # ===== Проверки и запуск =====
 ansible.ping: ## ansible -m ping для всех хостов
-	@$(ACTIVATE); $(AI) -i $(INVENTORY) all -m ping
+	@cd "$(ROOT_DIR)" && $(ACTIVATE); $(AI) -i "$(INVENTORY)" all -m ping
 
 ansible.lint: ## ansible-lint для плейбуков/ролей
-	@$(ACTIVATE); ansible-lint -c "$(ANSIBLE_CFG)" || ansible-lint || true
+	@cd "$(ROOT_DIR)" && $(ACTIVATE); ansible-lint -c "$(ANSIBLE_CFG)" || ansible-lint || true
 
 ansible.check: ## Прогон плейбука в --check (dry-run)
-	@$(ACTIVATE); $(AIPB) -i $(INVENTORY) "$(PLAYBOOK)" --check $(LIMIT) $(TAGS) $(EXTRA_VARS)
+	@cd "$(ROOT_DIR)" && $(ACTIVATE); $(AIPB) -i "$(INVENTORY)" "$(PLAYBOOK)" --check $(LIMIT) $(TAGS) $(EXTRA_VARS)
 
 ansible.run: ## Запуск плейбука (боевой)
-	@$(ACTIVATE); $(AIPB) -i $(INVENTORY) "$(PLAYBOOK)" $(LIMIT) $(TAGS) $(EXTRA_VARS)
+	@cd "$(ROOT_DIR)" && $(ACTIVATE); $(AIPB) -i "$(INVENTORY)" "$(PLAYBOOK)" $(LIMIT) $(TAGS) $(EXTRA_VARS)
 
 ansible.tags: ## Показать доступные теги плейбука
-	@$(ACTIVATE); $(AIPB) -i $(INVENTORY) "$(PLAYBOOK)" --list-tags
+	@cd "$(ROOT_DIR)" && $(ACTIVATE); $(AIPB) -i "$(INVENTORY)" "$(PLAYBOOK)" --list-tags
 
 ansible.tasks: ## Показать задачи и роли (outline)
-	@$(ACTIVATE); $(AIPB) -i $(INVENTORY) "$(PLAYBOOK)" --list-tasks
+	@cd "$(ROOT_DIR)" && $(ACTIVATE); $(AIPB) -i "$(INVENTORY)" "$(PLAYBOOK)" --list-tasks
 
 # ===== Vault =====
 # VARS:
@@ -79,19 +80,19 @@ FILE ?= $(VAULT_FILE)
 
 ansible.vault.encrypt: ## Зашифровать FILE (vault.yml) целиком
 	@test -f "$(FILE)" || (echo "File not found: $(FILE)"; exit 1)
-	@$(ACTIVATE); ansible-vault encrypt "$(FILE)"
+	@cd "$(ROOT_DIR)" && $(ACTIVATE); ansible-vault encrypt "$(FILE)"
 
 ansible.vault.decrypt: ## Расшифровать FILE целиком (осторожно!)
 	@test -f "$(FILE)" || (echo "File not found: $(FILE)"; exit 1)
-	@$(ACTIVATE); ansible-vault decrypt "$(FILE)"
+	@cd "$(ROOT_DIR)" && $(ACTIVATE); ansible-vault decrypt "$(FILE)"
 
 ansible.vault.edit: ## Открыть FILE в редакторе (ansible-vault edit)
 	@test -f "$(FILE)" || (echo "File not found: $(FILE)"; exit 1)
-	@$(ACTIVATE); ansible-vault edit "$(FILE)"
+	@cd "$(ROOT_DIR)" && $(ACTIVATE); ansible-vault edit "$(FILE)"
 
 ansible.vault.view: ## Показать FILE (ansible-vault view)
 	@test -f "$(FILE)" || (echo "File not found: $(FILE)"; exit 1)
-	@$(ACTIVATE); ansible-vault view "$(FILE)"
+	@cd "$(ROOT_DIR)" && $(ACTIVATE); ansible-vault view "$(FILE)"
 
 ansible.vault.add: ## Добавить строковый секрет: KEY=var_name VALUE=secret [FILE=...]
 	@test -n "$(KEY)" || (echo "Set KEY=var_name"; exit 1)
@@ -99,7 +100,7 @@ ansible.vault.add: ## Добавить строковый секрет: KEY=var_
 	@mkdir -p "$$(dirname "$(FILE)")"
 	@touch "$(FILE)"
 	@echo "==> Append encrypted $(KEY) to $(FILE)"
-	@$(ACTIVATE); ansible-vault encrypt_string '$(VALUE)' --name '$(KEY)' >> "$(FILE)"
+	@cd "$(ROOT_DIR)" && $(ACTIVATE); ansible-vault encrypt_string '$(VALUE)' --name '$(KEY)' >> "$(FILE)"
 
 # ===== Примеры =====
 # make ansible.run LIMIT='-l vps_edge'
