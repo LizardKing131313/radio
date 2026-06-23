@@ -94,7 +94,7 @@ jobs:
         run: |
           markdownlint-cli2 "**/*.md" \
           "#node_modules" "#.venv" ".venv-wsl" "#.git" \
-          "#.i18n_cache" "#.codex" "#.continue" || \
+          "#.i18n_cache" "#.codex" "#.continue" "#openspec" || \
           (echo "::warning::Markdownlint issues found"; exit 1)
 
   codeowners:
