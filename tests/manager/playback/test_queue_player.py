@@ -85,7 +85,7 @@ def test_queue_player_push_start_and_finish(
     player.close()
 
 
-def test_queue_player_skips_missing_audio(runtime: tuple[AppConfig, Database]) -> None:
+def test_queue_player_marks_missing_audio_failed(runtime: tuple[AppConfig, Database]) -> None:
     cfg, db = runtime
     track_id = TracksRepo(db).upsert("youtube0001", "Track", 120)
     queue_id = QueueRepo(db).enqueue(track_id)
@@ -94,7 +94,8 @@ def test_queue_player_skips_missing_audio(runtime: tuple[AppConfig, Database]) -
 
     history = QueueRepo(db).history(limit=1)
     assert history[0][0].id == queue_id
-    assert history[0][0].status == "skipped"
+    assert history[0][0].status == "failed"
+    assert history[0][0].error_detail == "track has no audio_path"
 
 
 def test_queue_player_releases_item_when_liquidsoap_fails(

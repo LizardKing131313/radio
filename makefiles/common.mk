@@ -26,3 +26,6 @@ RUFF     := $(VENV_BIN)/ruff
 BLACK    := $(VENV_BIN)/black
 MYPY     := $(VENV_BIN)/mypy
 PYTEST   := $(VENV_BIN)/pytest
+
+# Python source roots. Tooling must not walk virtualenvs/caches via ".".
+PY_CODE_DIRS := alembic manager scripts tests

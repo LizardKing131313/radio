@@ -536,6 +536,14 @@ class QueueRepo:
                 update(QueueItemRow).where(QueueItemRow.id == queue_id).values(status=status)
             )
 
+    def mark_failed(self, queue_id: int, error_detail: str) -> None:
+        with self.db.session() as session:
+            session.execute(
+                update(QueueItemRow)
+                .where(QueueItemRow.id == queue_id)
+                .values(status="failed", error_detail=error_detail, finished_at=func.now())
+            )
+
     def release_queued(self, queue_id: int) -> None:
         # Если Liquidsoap не принял request, возвращаем item назад в pending.
         with self.db.session() as session:
@@ -586,7 +594,7 @@ class QueueRepo:
             rows = session.execute(
                 select(QueueItemRow, TrackRow)
                 .join(TrackRow, TrackRow.id == QueueItemRow.track_id)
-                .where(QueueItemRow.status.in_(("done", "skipped")))
+                .where(QueueItemRow.status.in_(("done", "skipped", "failed")))
                 .order_by(func.coalesce(QueueItemRow.finished_at, QueueItemRow.enqueued_at).desc())
                 .limit(limit)
             ).all()
@@ -600,7 +608,7 @@ class QueueRepo:
         with self.db.session() as session:
             old_ids = session.scalars(
                 select(QueueItemRow.id)
-                .where(QueueItemRow.status.in_(("done", "skipped")))
+                .where(QueueItemRow.status.in_(("done", "skipped", "failed")))
                 .order_by(func.coalesce(QueueItemRow.finished_at, QueueItemRow.enqueued_at).desc())
                 .offset(keep)
             ).all()

@@ -33,9 +33,10 @@ class TrackDict(TypedDict, total=False):
 class QueueItemDict(TypedDict, total=False):
     id: int
     track_id: int
-    status: str  # pending | queued | playing | done | skipped
+    status: str  # pending | queued | playing | done | skipped | failed
     requested_by: str | None
     note: str | None
+    error_detail: str | None
     enqueued_at: str
     started_at: str | None
     finished_at: str | None
@@ -159,6 +160,7 @@ class QueueItem:
     enqueued_at: str
     requested_by: str | None = None
     note: str | None = None
+    error_detail: str | None = None
     started_at: str | None = None
     finished_at: str | None = None
     sort_key: float | None = None
@@ -172,6 +174,11 @@ class QueueItem:
             enqueued_at=str(row["enqueued_at"]),
             requested_by=(str(row["requested_by"]) if row["requested_by"] is not None else None),
             note=(str(row["note"]) if row["note"] is not None else None),
+            error_detail=(
+                str(row["error_detail"])
+                if "error_detail" in row and row["error_detail"] is not None
+                else None
+            ),
             started_at=(str(row["started_at"]) if row["started_at"] is not None else None),
             finished_at=(str(row["finished_at"]) if row["finished_at"] is not None else None),
             sort_key=(float(row["sort_key"]) if row["sort_key"] is not None else None),
@@ -184,6 +191,7 @@ class QueueItem:
             status=self.status,
             requested_by=self.requested_by,
             note=self.note,
+            error_detail=self.error_detail,
             enqueued_at=self.enqueued_at,
             started_at=self.started_at,
             finished_at=self.finished_at,

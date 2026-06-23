@@ -105,11 +105,15 @@ class QueuePlayer:
         queue_item, track = reserved
         path = _audio_path(track)
         if path is None or not path.exists():
-            self.queue.mark_done(queue_item.id, skipped=True)
+            error_detail = (
+                "track has no audio_path" if path is None else f"audio file is missing: {path}"
+            )
+            self.queue.mark_failed(queue_item.id, error_detail)
             self.log.warning(
-                "queue item skipped because audio file is missing",
+                "queue item failed because audio file is missing",
                 queue_id=queue_item.id,
                 track_id=track.id,
+                error_detail=error_detail,
                 audio_path=str(path) if path is not None else None,
             )
             return

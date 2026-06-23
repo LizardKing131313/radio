@@ -136,6 +136,7 @@ def test_queue_insert_sort_read_and_cleanup(database: Database) -> None:
     queue = _queue(database)
     first_track = tracks.upsert("youtube0001", "First", 120)
     second_track = tracks.upsert("youtube0002", "Second", 120)
+    third_track = tracks.upsert("youtube0003", "Third", 120)
 
     first_queue = queue.enqueue(first_track, sort_key=100.0)
     queue.mark_playing(first_queue)
@@ -156,8 +157,11 @@ def test_queue_insert_sort_read_and_cleanup(database: Database) -> None:
 
     queue.mark_done(first_queue)
     queue.mark_done(next_queue, skipped=True)
-    assert queue.history(limit=2)
-    assert queue.cleanup_done(keep=1) == 1
+    failed_queue = queue.enqueue(third_track)
+    queue.mark_failed(failed_queue, "audio file is missing")
+    history = queue.history(limit=3)
+    assert any(item.status == "failed" and item.error_detail for item, _track in history)
+    assert queue.cleanup_done(keep=1) == 2
 
 
 def test_queue_empty_paths(database: Database) -> None:

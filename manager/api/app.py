@@ -273,10 +273,11 @@ ADMIN_HTML = """<!doctype html>
     function queueRow(item) {
       const queueItem = item.queue_item || {};
       const track = item.track || {};
+      const detail = queueItem.error_detail ? `<br><span class="muted">${escapeHtml(queueItem.error_detail)}</span>` : '';
       return `<tr>
         <td data-label="ID">${queueItem.id || ''}</td>
         <td data-label="Трек"><b>${escapeHtml(track.title || 'Без названия')}</b><br><span class="muted">${escapeHtml(track.youtube_id || '')}</span></td>
-        <td data-label="Статус">${escapeHtml(queueItem.status || '?')}</td>
+        <td data-label="Статус">${escapeHtml(queueItem.status || '?')}${detail}</td>
       </tr>`;
     }
     function formatYoutube(telemetry) {

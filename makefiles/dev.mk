@@ -17,17 +17,17 @@ help-dev:
 # ---- DEV ---------------------------------------------------------------------
 .PHONY: lint
 lint:
-	cd "$(ROOT_DIR)" && "$(RUFF)" check .
-	cd "$(ROOT_DIR)" && "$(BLACK)" --check .
+	cd "$(ROOT_DIR)" && "$(RUFF)" check $(PY_CODE_DIRS)
+	cd "$(ROOT_DIR)" && "$(BLACK)" --check $(PY_CODE_DIRS)
 
 .PHONY: format
 format:
-	cd "$(ROOT_DIR)" && "$(RUFF)" check . --fix
-	cd "$(ROOT_DIR)" && "$(BLACK)" .
+	cd "$(ROOT_DIR)" && "$(RUFF)" check $(PY_CODE_DIRS) --fix
+	cd "$(ROOT_DIR)" && "$(BLACK)" $(PY_CODE_DIRS)
 
 .PHONY: typecheck
 typecheck:
-	cd "$(ROOT_DIR)" && "$(MYPY)" .
+	cd "$(ROOT_DIR)" && "$(MYPY)" $(PY_CODE_DIRS)
 
 .PHONY: spec
 spec:

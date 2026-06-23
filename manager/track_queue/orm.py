@@ -59,7 +59,7 @@ class QueueItemRow(Base):
     __tablename__ = "queue_items"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pending', 'queued', 'playing', 'done', 'skipped')",
+            "status IN ('pending', 'queued', 'playing', 'done', 'skipped', 'failed')",
             name="ck_queue_items_status",
         ),
     )
@@ -69,6 +69,7 @@ class QueueItemRow(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
     requested_by: Mapped[str | None] = mapped_column(Text)
     note: Mapped[str | None] = mapped_column(Text)
+    error_detail: Mapped[str | None] = mapped_column(Text)
     enqueued_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -142,6 +143,7 @@ def queue_item_from_orm(row: QueueItemRow) -> QueueItem:
         enqueued_at=_text(row.enqueued_at),
         requested_by=row.requested_by,
         note=row.note,
+        error_detail=row.error_detail,
         started_at=_optional_text(row.started_at),
         finished_at=_optional_text(row.finished_at),
         sort_key=row.sort_key,

@@ -43,13 +43,24 @@ where = ["."]
 line-length = 100
 target-version = ["py311"]
 skip-string-normalization = false
+extend-exclude = '''
+(
+  ^/\.venv/
+  | ^/\.venv-wsl/
+  | ^/\.mypy_cache/
+  | ^/\.ruff_cache/
+  | ^/\.pytest_cache/
+  | ^/htmlcov/
+  | ^/test-results/
+)
+'''
 
 # ---------- Ruff (новая схема 0.6+) ----------
 [tool.ruff]
 line-length = 100
 target-version = "py311"
 respect-gitignore = true
-exclude = ["*.j2"]
+exclude = ["*.j2", ".venv-wsl"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "PT", "RUF", "C4", "ANN"]
@@ -76,7 +87,7 @@ warn_unused_configs = true
 strict_optional = false
 disallow_untyped_defs = false
 files = ["scripts", "tests", "manager"]
-exclude = "(?i)^(venv|\\.venv|build|dist|\\.git)(/|$)"
+exclude = "(?i)^(venv|\\.venv|\\.venv-wsl|build|dist|\\.git)(/|$)"
 cache_dir = ".mypy_cache"
 
 [[tool.mypy.overrides]]
