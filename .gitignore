@@ -29,6 +29,7 @@ Thumbs.db
 .coverage
 coverage.xml
 htmlcov/
+.openspec-test-*
 .pytest_cache/
 pytest_cache/
 test-results/

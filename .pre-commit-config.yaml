@@ -50,6 +50,14 @@ repos:
 
   - repo: local
     hooks:
+      - id: openspec-validate
+        name: Validate OpenSpec
+        entry: openspec validate --all --strict --no-interactive
+        language: node
+        additional_dependencies:
+          - "@fission-ai/openspec@1.4.1"
+        pass_filenames: false
+
       - id: run-tests
         name: Run pytest
         entry: python scripts/precommit_pytest.py

@@ -1,0 +1,35 @@
+schema: spec-driven
+context: |
+  Online Radio is a Python 3.11+ project for a Kubernetes-deployable 24/7 radio
+  pipeline. Kubernetes owns long-running process lifecycle. Python is limited to
+  application work: YouTube search, prefetch/download coordination, PostgreSQL
+  repositories, thin FastAPI endpoints, and FFmpeg argument assembly.
+
+  Main engineering constraint: follow openspec/specs/code-quality/spec.md.
+  Prefer the smallest working solution. Do not add abstractions, services,
+  databases, queues, dependencies, or configuration unless the current change
+  needs them. PostgreSQL is the source of truth for domain data, Alembic owns
+  schema changes, and the filesystem remains the right place for audio cache,
+  FIFO/runtime files, and HLS output.
+rules:
+  proposal:
+    - List affected OpenSpec capabilities from openspec/specs when requirements change.
+    - Treat code-quality as affected when scope, reuse, config, dependencies, or abstractions change.
+    - Call out the tests or validation commands that will prove the change.
+    - Keep scope narrow; split unrelated runtime, API, deployment, and storage changes.
+  specs:
+    - Requirements must use SHALL or MUST in the requirement body.
+    - Every requirement must include at least one concrete Scenario.
+    - Prefer observable behavior over implementation detail.
+  design:
+    - Check openspec/specs/code-quality/spec.md before choosing an implementation shape.
+    - Start from the smallest implementation that can satisfy the spec and tests.
+    - Reuse existing project patterns before introducing a new one.
+    - Keep new configuration and new dependencies out unless the current change cannot work without them.
+    - Do not introduce Redis, brokers, operators, or new services without a current requirement.
+    - Keep FastAPI thin, keep lifecycle ownership in Kubernetes, and keep schema ownership in Alembic.
+  tasks:
+    - Put failing or updated tests before implementation tasks for behavior changes.
+    - Include a task to reuse or extend existing code paths when the change touches an established area.
+    - Include validation tasks for openspec, lint, typecheck, and tests.
+    - Mark tasks done only after the command or code change has actually completed.

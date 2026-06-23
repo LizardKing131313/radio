@@ -7,11 +7,12 @@ help-dev:
 	@echo "  lint 					 - check code files with configuration from pyproject.toml"
 	@echo "  format  				 - check and auto fix code files with configuration from pyproject.toml"
 	@echo "  typecheck  		 - mypy type checks with configuration from pyproject.toml"
+	@echo "  spec            - validate OpenSpec specs and active changes"
 	@echo "  test  					 - run pytest. Stop after first failed test"
 	@echo "  test-all  			 - run all pytest"
 	@echo "  coverage  			 - run all pytest with coverage"
 	@echo "  coverage-badge  - generate coverage badge"
-	@echo "  ci  						 - run linter and tests"
+	@echo "  ci  						 - run specs, linter, typecheck and tests"
 
 # ---- DEV ---------------------------------------------------------------------
 .PHONY: lint
@@ -27,6 +28,10 @@ format:
 .PHONY: typecheck
 typecheck:
 	cd "$(ROOT_DIR)" && "$(MYPY)" .
+
+.PHONY: spec
+spec:
+	cd "$(ROOT_DIR)" && openspec validate --all --strict --no-interactive
 
 .PHONY: test
 test:
@@ -45,4 +50,4 @@ coverage-badge:
 	cd "$(ROOT_DIR)" && "$(PYTHON)" scripts/badge/gen_badge.py
 
 .PHONY: ci
-ci: lint test
+ci: spec lint typecheck test

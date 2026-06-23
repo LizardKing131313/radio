@@ -5,6 +5,17 @@
 [![Qodana](https://github.com/LizardKing131313/radio/actions/workflows/qodana_code_quality.yml/badge.svg)](https://github.com/LizardKing131313/radio/actions/workflows/qodana_code_quality.yml)
 ![Coverage](badges/coverage.svg)
 
+## Development
+
+Non-trivial behavior, API, persistence, runtime and deployment changes go through
+OpenSpec first, then tests, then implementation. Local gate:
+
+```bash
+make ci
+```
+
+Workflow details: [docs/development-process.md](docs/development-process.md).
+
 ## Deployment
 
 The production target is Kubernetes:

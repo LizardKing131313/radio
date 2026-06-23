@@ -21,6 +21,7 @@ jobs:
     env:
       PYTHONUTF8: "1"
       PYTHONIOENCODING: "UTF-8"
+      OPENSPEC_TELEMETRY: "0"
     strategy:
       fail-fast: false
       matrix:
@@ -39,6 +40,17 @@ jobs:
           cache-dependency-path: |
             pyproject.toml
             requirements*.txt
+
+      - name: Setup Node for OpenSpec
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install OpenSpec
+        run: npm install -g @fission-ai/openspec@1.4.1
+
+      - name: OpenSpec validation
+        run: openspec validate --all --strict --no-interactive
 
       - name: Install dependencies (dev extras)
         run: |
