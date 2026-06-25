@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from typing import Any, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -26,6 +27,36 @@ class YouTubeAPIError(RuntimeError):
         self.status_code = status_code
 
 
+@dataclass(frozen=True)
+class SearchPage:
+    tracks: list[TrackDict]
+    next_page_token: str | None
+    raw_count: int
+
+
+def search_title_page(
+    title: str,
+    api_key: str,
+    max_results: int,
+    page_token: str | None = None,
+) -> SearchPage:
+    """Найти одну страницу YouTube search results и вернуть token следующей."""
+    if not title.strip() or not api_key.strip() or max_results < 1:
+        return SearchPage(tracks=[], next_page_token=None, raw_count=0)
+
+    entries, next_page_token = _load_search_entries(
+        title,
+        api_key,
+        min(50, max_results),
+        page_token,
+    )
+    return SearchPage(
+        tracks=_accepted_tracks(title, entries),
+        next_page_token=next_page_token,
+        raw_count=len(entries),
+    )
+
+
 def search_title_window(title: str, api_key: str, start: int, end: int) -> list[TrackDict]:
     """Найти и отфильтровать окно результатов YouTube, нумерация с 1."""
     if not title.strip() or not api_key.strip() or start < 1 or end < start:
@@ -38,43 +69,59 @@ def search_title_window(title: str, api_key: str, start: int, end: int) -> list[
     # метаданных добираем отдельным videos.list батчем по найденным id.
     while len(raw_entries) < end:  # pragma: no branch
         page_size = min(50, end - len(raw_entries))
-        search_data = _get_json(
-            YOUTUBE_SEARCH_URL,
-            {
-                "part": "snippet",
-                "q": title,
-                "type": "video",
-                "videoCategoryId": "10",
-                "maxResults": str(page_size),
-                "order": "relevance",
-                "safeSearch": "none",
-                "key": api_key,
-                **({"pageToken": page_token} if page_token else {}),
-            },
-        )
-
-        items = [item for item in search_data.get("items", []) if isinstance(item, dict)]
-        if not items:
+        entries, page_token = _load_search_entries(title, api_key, page_size, page_token)
+        if not entries:
             break
-
-        video_ids = [video_id for item in items if (video_id := _video_id(item))]
-        details_by_id = _load_video_details(api_key, video_ids)
-
-        for item in items:
-            video_id = _video_id(item)
-            if video_id is None:
-                continue
-            entry = _entry_from_api_item(item, details_by_id.get(video_id, {}))
-            if entry is not None:
-                raw_entries.append(entry)
-
-        page_token = cast(str | None, search_data.get("nextPageToken"))
+        raw_entries.extend(entries)
         if not page_token:
             break
 
+    return _accepted_tracks(title, raw_entries[start - 1 : end])
+
+
+def _load_search_entries(
+    title: str,
+    api_key: str,
+    page_size: int,
+    page_token: str | None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    search_data = _get_json(
+        YOUTUBE_SEARCH_URL,
+        {
+            "part": "snippet",
+            "q": title,
+            "type": "video",
+            "maxResults": str(min(50, max(1, page_size))),
+            "order": "relevance",
+            "safeSearch": "none",
+            "key": api_key,
+            **({"pageToken": page_token} if page_token else {}),
+        },
+    )
+
+    items = [item for item in search_data.get("items", []) if isinstance(item, dict)]
+    if not items:
+        return [], None
+
+    video_ids = [video_id for item in items if (video_id := _video_id(item))]
+    details_by_id = _load_video_details(api_key, video_ids)
+    entries: list[dict[str, Any]] = []
+    for item in items:
+        video_id = _video_id(item)
+        if video_id is None:
+            continue
+        entry = _entry_from_api_item(item, details_by_id.get(video_id, {}))
+        if entry is not None:
+            entries.append(entry)
+
+    next_page_token = search_data.get("nextPageToken")
+    return entries, next_page_token if isinstance(next_page_token, str) else None
+
+
+def _accepted_tracks(title: str, entries: list[dict[str, Any]]) -> list[TrackDict]:
     needle = title.lower()
     out: list[TrackDict] = []
-    for entry in raw_entries[start - 1 : end]:
+    for entry in entries:
         # В каталог берем только обычные музыкальные ролики разумной длины.
         if is_live(entry):
             continue

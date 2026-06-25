@@ -23,8 +23,8 @@ hls:
 search:
   title: "говновоз"
   interval_sec: 21600
-  window_size: 10
-  max_windows_per_tick: 1
+  window_size: 50
+  max_windows_per_tick: 3
   quota_backoff_sec: 43200
 
 # Secrets are intentionally left empty in YAML.

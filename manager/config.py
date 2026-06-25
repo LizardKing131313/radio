@@ -43,8 +43,8 @@ class HLSSettings(BaseModel):
 class SearchSettings(BaseModel):
     title: str = Field(default="говновоз")
     interval_sec: int = Field(default=21600)
-    window_size: int = Field(default=10)
-    max_windows_per_tick: int = Field(default=1)
+    window_size: int = Field(default=50)
+    max_windows_per_tick: int = Field(default=3)
     quota_backoff_sec: int = Field(default=43200)
 
 

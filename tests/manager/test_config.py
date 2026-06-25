@@ -52,8 +52,8 @@ secrets: {}
     assert cfg.hls.hls_delete_threshold == 14
     assert cfg.hls.bitrates == [64, 96, 128]
     assert cfg.search.interval_sec == 21600
-    assert cfg.search.window_size == 10
-    assert cfg.search.max_windows_per_tick == 1
+    assert cfg.search.window_size == 50
+    assert cfg.search.max_windows_per_tick == 3
     assert cfg.search.quota_backoff_sec == 43200
 
 

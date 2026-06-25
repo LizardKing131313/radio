@@ -28,7 +28,13 @@ def test_record_youtube_api_success_accumulates(tmp_path: Path) -> None:
     path = tmp_path / "youtube.json"
     now = datetime(2026, 1, 1, tzinfo=UTC)
 
-    record_youtube_api_success(path, estimated_quota_units=101, result_count=2, now=now)
+    record_youtube_api_success(
+        path,
+        estimated_quota_units=101,
+        result_count=2,
+        next_page_token="next",
+        now=now,
+    )
     record_youtube_api_success(path, estimated_quota_units=202, result_count=3, now=now)
     state = read_youtube_api_telemetry(path)
 
@@ -37,6 +43,7 @@ def test_record_youtube_api_success_accumulates(tmp_path: Path) -> None:
     assert state["result_count"] == 5
     assert state["estimated_quota_units"] == 303
     assert state["consecutive_errors"] == 0
+    assert state["next_page_token"] is None
     assert state["last_success_at"] == now.isoformat()
 
 

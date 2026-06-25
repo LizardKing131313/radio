@@ -52,6 +52,21 @@ spec:
               until pg_isready -h postgres -U "${POSTGRES_USER}" -d "${POSTGRES_DB}"; do
                 sleep 2
               done
+        # Alembic runs as a separate Job. App containers wait until the schema is
+        # visible, otherwise fresh deploys can crash-loop before migrations finish.
+        - name: wait-schema
+          image: radio-manager:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - secretRef:
+                name: radio-secrets
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              until python -m manager db-check; do
+                sleep 2
+              done
         # Runtime-директории и FIFO живут внутри pod. Аудиокеш хранится на PVC,
         # HLS-файлы можно потерять и пересоздать.
         - name: prepare-runtime
@@ -104,6 +119,7 @@ spec:
             exec:
               command: [ "python", "-m", "manager", "db-check" ]
             initialDelaySeconds: 10
+            timeoutSeconds: 5
             periodSeconds: 30
         # Prefetch - единственный контейнер, где запускается yt-dlp.
         - name: prefetch
@@ -123,6 +139,7 @@ spec:
             exec:
               command: [ "python", "-m", "manager", "db-check" ]
             initialDelaySeconds: 10
+            timeoutSeconds: 5
             periodSeconds: 30
         # Queue player - мост между Postgres queue_items и Liquidsoap request.queue.
         # Он не запускает аудиопроцессы, только отправляет request_queue.push.
@@ -145,6 +162,7 @@ spec:
             exec:
               command: [ "python", "-m", "manager", "db-check" ]
             initialDelaySeconds: 10
+            timeoutSeconds: 5
             periodSeconds: 30
         # API - тонкая HTTP-обертка над репозиториями, без управления процессами.
         - name: api

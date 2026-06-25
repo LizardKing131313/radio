@@ -4,6 +4,8 @@ import json
 from email.message import Message
 from io import BytesIO
 from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, urlparse
+from urllib.request import Request
 
 import pytest
 
@@ -111,11 +113,41 @@ def test_search_title_window_handles_pagination(monkeypatch: pytest.MonkeyPatch)
     assert [track["youtube_id"] for track in tracks] == ["second00001"]
 
 
+def test_search_title_page_uses_token_without_category_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = [
+        {
+            "items": [_search_item("valid000001", "Needle One")],
+            "nextPageToken": "next-token",
+        },
+        {"items": [_video_item("valid000001", "Needle One", "PT2M")]},
+    ]
+    seen_queries: list[dict[str, list[str]]] = []
+
+    def fake_urlopen(request: Request, timeout: float) -> FakeResponse:
+        assert timeout == 10.0
+        seen_queries.append(parse_qs(urlparse(request.full_url).query))
+        return FakeResponse(responses.pop(0))
+
+    monkeypatch.setattr(helpers, "urlopen", fake_urlopen)
+
+    page = helpers.search_title_page("needle", "key", 50, "page-token")
+
+    assert [track["youtube_id"] for track in page.tracks] == ["valid000001"]
+    assert page.next_page_token == "next-token"
+    assert page.raw_count == 1
+    assert seen_queries[0]["maxResults"] == ["50"]
+    assert seen_queries[0]["pageToken"] == ["page-token"]
+    assert "videoCategoryId" not in seen_queries[0]
+
+
 def test_search_title_window_invalid_inputs() -> None:
     assert helpers.search_title_window("", "key", 1, 1) == []
     assert helpers.search_title_window("title", "", 1, 1) == []
     assert helpers.search_title_window("title", "key", 0, 1) == []
     assert helpers.search_title_window("title", "key", 2, 1) == []
+    assert helpers.search_title_page("title", "key", 0) == helpers.SearchPage([], None, 0)
 
 
 def test_search_title_window_empty_api_page(monkeypatch: pytest.MonkeyPatch) -> None:

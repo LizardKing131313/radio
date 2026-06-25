@@ -72,6 +72,28 @@ JSON.
 - **THEN** telemetry marks `quota_exhausted: true`
 - **AND** search uses quota backoff for the next sleep
 
+### Requirement: Quota-aware pagination
+
+Система SHALL avoid repeatedly buying the same YouTube search page when a
+previous page token is available.
+
+#### Scenario: Search page succeeds with a next token
+
+- **WHEN** YouTube returns `nextPageToken` for a successful search page
+- **THEN** telemetry stores the token
+- **AND** the next search tick starts from that token instead of the first page
+
+#### Scenario: Search window exceeds one YouTube page
+
+- **WHEN** configured `window_size` is greater than 50
+- **THEN** search splits the window into multiple `search.list` pages
+- **AND** each page uses the previous page's `nextPageToken`
+
+#### Scenario: Search worker restarts after a recent request
+
+- **WHEN** telemetry contains a recent success or quota error timestamp
+- **THEN** search waits for the remaining configured interval or quota backoff before calling YouTube again
+
 ### Requirement: Search loop simplicity
 
 Система SHALL rely on Kubernetes restart policy and PostgreSQL deduplication

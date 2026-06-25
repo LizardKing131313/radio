@@ -23,6 +23,7 @@ def record_youtube_api_success(
     *,
     estimated_quota_units: int,
     result_count: int,
+    next_page_token: str | None = None,
     now: datetime | None = None,
 ) -> None:
     state = read_youtube_api_telemetry(path)
@@ -37,6 +38,7 @@ def record_youtube_api_success(
             "last_http_status": None,
             "quota_exhausted": False,
             "consecutive_errors": 0,
+            "next_page_token": next_page_token,
             "windows_ok": cast(int, state["windows_ok"]) + 1,
             "result_count": cast(int, state["result_count"]) + result_count,
             "estimated_quota_units": cast(int, state["estimated_quota_units"])
@@ -91,6 +93,7 @@ def _empty_state(*, status: str) -> dict[str, object]:
         "last_http_status": None,
         "quota_exhausted": False,
         "consecutive_errors": 0,
+        "next_page_token": None,
         "windows_ok": 0,
         "result_count": 0,
         "estimated_quota_units": 0,
