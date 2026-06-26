@@ -14,9 +14,10 @@ from manager.track_queue.repo import QueueRepo, TracksRepo
 
 
 class FakeLiquidsoap:
-    def __init__(self, queue_body: str = "3") -> None:
+    def __init__(self, queue_body: str = "3", play_now_body: str = "") -> None:
         self.pushed: list[str] = []
         self.queue_body = queue_body
+        self.play_now_body = play_now_body
 
     def push_request(self, uri: str) -> str:
         self.pushed.append(uri)
@@ -24,6 +25,9 @@ class FakeLiquidsoap:
 
     def queue_requests(self) -> str:
         return self.queue_body
+
+    def play_now_status(self) -> str:
+        return self.play_now_body
 
 
 class FailingLiquidsoap(FakeLiquidsoap):
@@ -81,8 +85,110 @@ def test_queue_player_push_start_and_finish(
         encoding="utf-8",
     )
     player.tick()
+    assert QueueRepo(db).current_playing() is not None
+    player.tick()
+    assert QueueRepo(db).current_playing() is not None
+    player.tick()
     assert QueueRepo(db).history(limit=1)[0][0].status == "done"
     player.close()
+
+
+def test_queue_player_requires_stable_empty_metadata_before_finish(
+    runtime: tuple[AppConfig, Database],
+) -> None:
+    cfg, db = runtime
+    track_id = TracksRepo(db).upsert("youtube0001", "Track", 120)
+    queue = QueueRepo(db)
+    queue_id = queue.enqueue(track_id)
+    queue.mark_playing(queue_id)
+    player = QueuePlayer(config=cfg, database=db, liquidsoap=FakeLiquidsoap())
+
+    player._finish_old_playing(QueueMetadata(queue_id=None, track_id=None))
+    assert queue.current_playing() is not None
+
+    player._finish_old_playing(QueueMetadata(queue_id=None, track_id=None))
+    assert queue.current_playing() is not None
+
+    player._finish_old_playing(QueueMetadata(queue_id=None, track_id=None))
+    assert queue.history(limit=1)[0][0].id == queue_id
+
+
+def test_queue_player_keeps_playing_when_track_id_matches_without_queue_id(
+    runtime: tuple[AppConfig, Database],
+) -> None:
+    cfg, db = runtime
+    track_id = TracksRepo(db).upsert("youtube0001", "Track", 120)
+    queue = QueueRepo(db)
+    queue_id = queue.enqueue(track_id)
+    queue.mark_playing(queue_id)
+    player = QueuePlayer(config=cfg, database=db, liquidsoap=FakeLiquidsoap())
+
+    player._finish_old_playing(QueueMetadata(queue_id=None, track_id=track_id))
+
+    assert queue.current_playing() is not None
+
+
+def test_queue_player_finishes_mismatched_metadata_with_queue_id(
+    runtime: tuple[AppConfig, Database],
+) -> None:
+    cfg, db = runtime
+    track_id = TracksRepo(db).upsert("youtube0001", "Track", 120)
+    queue = QueueRepo(db)
+    queue_id = queue.enqueue(track_id)
+    queue.mark_playing(queue_id)
+    player = QueuePlayer(config=cfg, database=db, liquidsoap=FakeLiquidsoap())
+
+    player._finish_old_playing(QueueMetadata(queue_id=queue_id + 100, track_id=None))
+
+    assert queue.history(limit=1)[0][0].id == queue_id
+
+
+def test_queue_player_preloads_next_pending_while_current_is_playing(
+    runtime: tuple[AppConfig, Database], tmp_path: Path
+) -> None:
+    cfg, db = runtime
+    first_audio = tmp_path / "first.opus"
+    next_audio = tmp_path / "next.opus"
+    first_audio.write_text("first", encoding="utf-8")
+    next_audio.write_text("next", encoding="utf-8")
+    tracks = TracksRepo(db)
+    first_track = tracks.upsert("youtube0001", "First", 120, audio_path=str(first_audio))
+    next_track = tracks.upsert("youtube0002", "Next", 120, audio_path=str(next_audio))
+    queue = QueueRepo(db)
+    playing_id = queue.enqueue(first_track, sort_key=100.0)
+    next_id = queue.enqueue(next_track, sort_key=99.0)
+    queue.mark_playing(playing_id)
+    liquidsoap = FakeLiquidsoap()
+    player = QueuePlayer(config=cfg, database=db, liquidsoap=liquidsoap)
+
+    player.tick()
+
+    assert len(liquidsoap.pushed) == 1
+    assert f'queue_id="{next_id}"' in liquidsoap.pushed[0]
+    queued = queue.current_queued()
+    assert queued is not None
+    assert queued[0].id == next_id
+
+
+def test_queue_player_finishes_stale_playing_item_after_restart(
+    runtime: tuple[AppConfig, Database],
+) -> None:
+    cfg, db = runtime
+    track_id = TracksRepo(db).upsert("youtube0001", "Track", 120)
+    queue = QueueRepo(db)
+    queue_id = queue.enqueue(track_id)
+    queue.mark_playing(queue_id)
+    player = QueuePlayer(config=cfg, database=db, liquidsoap=FakeLiquidsoap(queue_body=""))
+
+    player._finish_old_playing(QueueMetadata(queue_id=None, track_id=None))
+    player._finish_old_playing(QueueMetadata(queue_id=None, track_id=None))
+    assert queue.current_playing() is not None
+
+    player._finish_old_playing(QueueMetadata(queue_id=None, track_id=None))
+
+    history = queue.history(limit=1)
+    assert history[0][0].id == queue_id
+    assert history[0][0].status == "done"
 
 
 def test_queue_player_marks_missing_audio_failed(runtime: tuple[AppConfig, Database]) -> None:
@@ -141,8 +247,13 @@ def test_queue_player_repairs_lost_queued_item(
     queue_id = queue.enqueue(track_id)
     queue.reserve_next()
     liquidsoap = FakeLiquidsoap(queue_body="")
+    player = QueuePlayer(config=cfg, database=db, liquidsoap=liquidsoap)
 
-    QueuePlayer(config=cfg, database=db, liquidsoap=liquidsoap).tick()
+    player.tick()
+    player.tick()
+    assert len(liquidsoap.pushed) == 0
+
+    player.tick()
 
     active = queue.current_active()
     assert active is not None
@@ -159,6 +270,25 @@ def test_queue_player_keeps_live_queued_item(runtime: tuple[AppConfig, Database]
     queue.reserve_next()
 
     QueuePlayer(config=cfg, database=db, liquidsoap=FakeLiquidsoap(queue_body="3")).tick()
+
+    active = queue.current_active()
+    assert active is not None
+    assert active[0].id == queue_id
+    assert active[0].status == "queued"
+
+
+def test_queue_player_keeps_play_now_queued_item(runtime: tuple[AppConfig, Database]) -> None:
+    cfg, db = runtime
+    track_id = TracksRepo(db).upsert("youtube0001", "Track", 120)
+    queue = QueueRepo(db)
+    queue_id = queue.enqueue(track_id)
+    queue.reserve_next()
+
+    QueuePlayer(
+        config=cfg,
+        database=db,
+        liquidsoap=FakeLiquidsoap(queue_body="", play_now_body="playing"),
+    ).tick()
 
     active = queue.current_active()
     assert active is not None

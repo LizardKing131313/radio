@@ -47,9 +47,42 @@ def test_telnet_client_commands() -> None:
         _with_server(b"Queued\r\nEND\r\n", lambda client: client.push_request("/tmp/a.opus"))
         == "Queued"
     )
+    assert (
+        _with_server(b"Queued\r\nEND\r\n", lambda client: client.push_play_now("/tmp/a.opus"))
+        == "Queued"
+    )
     assert _with_server(b"Done.\r\nEND\r\n", lambda client: client.skip_output()) == "Done."
+    assert _with_server(b"Done.\r\nEND\r\n", lambda client: client.skip_request_queue()) == "Done."
+    assert _with_server(b"Done.\r\nEND\r\n", lambda client: client.skip_play_now()) == "Done."
     assert _with_server(b"Done.\r\nEND\r\n", lambda client: client.flush_request_queue()) == "Done."
+    assert _with_server(b"Done.\r\nEND\r\n", lambda client: client.flush_play_now()) == "Done."
     assert _with_server(b"3\r\nEND\r\n", lambda client: client.queue_requests()) == "3"
+    assert _with_server(b"playing\r\nEND\r\n", lambda client: client.play_now_status()) == "playing"
+
+
+def test_skip_library_sources_calls_both_playlists(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    def command(_client: LiquidsoapTelnetClient, command_name: str) -> str:
+        calls.append(command_name)
+        return "Done."
+
+    monkeypatch.setattr(LiquidsoapTelnetClient, "command", command)
+
+    assert LiquidsoapTelnetClient().skip_library_sources() == ["Done.", "Done."]
+    assert calls == ["playlist.skip", "playlist.1.skip"]
+
+
+def test_skip_library_sources_requires_at_least_one_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def command(_client: LiquidsoapTelnetClient, command_name: str) -> str:
+        raise LiquidsoapTelnetError(f"{command_name} missing")
+
+    monkeypatch.setattr(LiquidsoapTelnetClient, "command", command)
+
+    with pytest.raises(LiquidsoapTelnetError, match=r"playlist\.skip missing"):
+        LiquidsoapTelnetClient().skip_library_sources()
 
 
 def test_telnet_error_response() -> None:

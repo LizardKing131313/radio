@@ -33,9 +33,18 @@ Search uses YouTube Data API; downloads still use `yt-dlp`.
 FastAPI is exposed under `/api/`; `/current` includes Liquidsoap nowplaying plus HLS offset, `/health` includes YouTube
 API telemetry, `/metrics` returns compact runtime JSON, `/metrics/prometheus` returns Prometheus exposition, and admin
 mutations require `RADIO_ADMIN_TOKEN`.
+The public player is served at `/player` as an installable PWA, and the admin shell is served at `/admin`.
 Kubernetes owns runtime process restarts: search, prefetch, queue-player, API, Liquidsoap, FFmpeg and Nginx are separate
 containers in the `radio` pod.
 Manual admin queue uses Liquidsoap `request.queue`; downloads still use `yt-dlp`.
+
+Frontend checks live under `frontend/`:
+
+```bash
+cd frontend
+npm install
+npm run check
+```
 
 Runtime details: [docs/runtime.md](docs/runtime.md).
 

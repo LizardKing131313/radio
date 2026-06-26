@@ -34,9 +34,9 @@ class Paths(BaseModel):
 class HLSSettings(BaseModel):
     """Настройки HLS названы почти как ffmpeg-флаги, чтобы проще сверять CLI."""
 
-    hls_time: int = Field(default=6)
-    hls_list_size: int = Field(default=12)
-    hls_delete_threshold: int = Field(default=14)
+    hls_time: int = Field(default=2)
+    hls_list_size: int = Field(default=6)
+    hls_delete_threshold: int = Field(default=8)
     bitrates: list[int] = Field(default_factory=lambda: [64, 96, 128])
 
 

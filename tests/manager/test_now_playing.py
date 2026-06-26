@@ -19,7 +19,7 @@ def test_current_snapshot_empty_source(tmp_path: Path) -> None:
     assert snapshot == {
         "source": None,
         "hls": {
-            "live_offset_sec": 18,
+            "live_offset_sec": 6,
             "age_sec": None,
             "estimated_audible_at": None,
             "is_probably_audible": False,

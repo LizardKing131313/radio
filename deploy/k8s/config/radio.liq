@@ -14,8 +14,6 @@ fifo_wav     = "/opt/radio/runtime/fifo/radio.wav"
 np_txt_file  = "/opt/radio/runtime/info/nowplaying.txt"
 
 # --- Источники треков
-# request.queue - готовая очередь Liquidsoap. Python только пушит URI через
-# telnet-команду request_queue.push, а не управляет аудиопроцессами сам.
 queue_source = request.queue()
 hot  = playlist(mode="random", reload_mode="watch", hot_dir)
 cold = playlist(mode="random", reload_mode="watch", cold_dir)
@@ -24,16 +22,81 @@ cold = playlist(mode="random", reload_mode="watch", cold_dir)
 # rotate держит hot как приоритетный короткий набор, но основную ротацию берет
 # из полного cold-каталога.
 library = rotate(weights=[1, 4], transition_length=0.0, [hot, cold])
-# Очередь не обрывает текущий трек: queued request стартует на ближайшей
-# границе трека, поэтому переключение не дергается посреди композиции.
-base = fallback(track_sensitive=true, [queue_source, library])
-base = stereo(base)
+# Обычная очередь не обрывает текущий трек.
+scheduled = fallback(track_sensitive=true, [queue_source, library])
+scheduled = stereo(scheduled)
 
 # --- Обработка звука без внешних плагинов
-base = normalize(target=-14.0, base)
+scheduled = normalize(target=-14.0, scheduled)
 # 6 секунд резали хвост трека слишком рано. 2 секунды дают мягкий стык без
 # заметного преждевременного переключения.
-base = crossfade(duration=2.0, fade_in=1.5, fade_out=1.5, base)
+scheduled = crossfade(duration=2.0, fade_in=1.5, fade_out=1.5, scheduled)
+
+# play-now не делаем вторым request.queue: request.queue становится not ready
+# сразу после забора request в current и fallback уходит назад в library.
+# Dynamic request.once держит одноразовый source до конца выбранного трека.
+play_now_uri = ref(null())
+play_now_pending = ref(false)
+play_now_active = ref(false)
+
+def play_now_done(_, _) =
+  play_now_active := false
+end
+
+def play_now_next() =
+  uri = play_now_uri()
+  if null.defined(uri) then
+    play_now_uri := null()
+    play_now_pending := false
+    play_now_active := true
+    request_source = request.once(request.create(null.get(uri)))
+    request_source = stereo(request_source)
+    request_source = normalize(target=-14.0, request_source)
+    request_source = source.on_end(delay={0.0}, request_source, play_now_done)
+    null(request_source)
+  else
+    null()
+  end
+end
+
+play_now = source.dynamic(id="play_now", track_sensitive=false, play_now_next)
+
+def play_now_push(uri) =
+  play_now_uri := null(uri)
+  play_now_pending := true
+  source.skip(scheduled)
+  source.skip(play_now)
+  "Queued"
+end
+
+def play_now_skip(_) =
+  play_now_uri := null()
+  play_now_pending := false
+  play_now_active := false
+  source.skip(play_now)
+  "Done"
+end
+
+def play_now_flush(_) =
+  play_now_uri := null()
+  play_now_pending := false
+  if play_now_active() then source.skip(play_now) end
+  play_now_active := false
+  "Done"
+end
+
+def play_now_status(_) =
+  if play_now_pending() then "pending"
+  elsif play_now_active() then "playing"
+  else "" end
+end
+
+server.register(namespace="play_now", usage="<uri>", description="Play URI immediately.", "push", play_now_push)
+server.register(namespace="play_now", description="Skip current play-now source.", "skip", play_now_skip)
+server.register(namespace="play_now", description="Clear pending/current play-now source.", "flush", play_now_flush)
+server.register(namespace="play_now", description="Return play-now state.", "status", play_now_status)
+
+base = fallback(track_sensitive=false, transition_length=0.0, [play_now, scheduled])
 
 # --- Резервный хвост: тишина вместо падения, если плейлисты пустые
 silence = blank(duration=0.5)
@@ -55,7 +118,8 @@ def write_nowplaying(m) =
   album  = list.assoc(default="",               "album",  m)
   queue_id = list.assoc(default="", "queue_id", m)
   track_id = list.assoc(default="", "track_id", m)
-  kv = "title=#{title}\nartist=#{artist}\nalbum=#{album}\nqueue_id=#{queue_id}\ntrack_id=#{track_id}\n"
+  queue_kind = list.assoc(default="", "queue_kind", m)
+  kv = "title=#{title}\nartist=#{artist}\nalbum=#{album}\nqueue_id=#{queue_id}\ntrack_id=#{track_id}\nqueue_kind=#{queue_kind}\n"
   file.write(append=false, data=kv, np_txt_file ^ ".kv")
 end
 

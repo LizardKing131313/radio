@@ -4,11 +4,19 @@ This repo uses a lightweight spec-driven workflow for non-trivial changes.
 
 ## Tooling
 
-Install OpenSpec once on the machine:
+Make targets run OpenSpec through the pinned package by default:
+
+```bash
+npx --yes @fission-ai/openspec@1.4.1 validate --all --strict --no-interactive
+```
+
+You can also install OpenSpec once on the machine and override the make variable
+when you want to use the global binary:
 
 ```bash
 npm install -g @fission-ai/openspec@1.4.1
 openspec init --tools codex
+make spec OPENSPEC=openspec
 ```
 
 Disable OpenSpec telemetry if needed:

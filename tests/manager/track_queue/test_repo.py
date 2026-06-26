@@ -7,6 +7,7 @@ import pytest
 from manager.config import AppConfig
 from manager.track_queue.db import Database
 from manager.track_queue.orm import Base, ConfigRow, _text
+from manager.track_queue.orm_typing import optional_row, rowcount
 from manager.track_queue.repo import OffersRepo, QueueRepo, TracksRepo
 
 
@@ -164,6 +165,66 @@ def test_queue_insert_sort_read_and_cleanup(database: Database) -> None:
     assert queue.cleanup_done(keep=1) == 2
 
 
+def test_enqueue_next_moves_item_to_front_of_pending_queue(database: Database) -> None:
+    tracks = _tracks(database)
+    queue = _queue(database)
+    first_track = tracks.upsert("youtube0001", "First", 120)
+    second_track = tracks.upsert("youtube0002", "Second", 120)
+    priority_track = tracks.upsert("youtube0003", "Priority", 120)
+
+    first_queue = queue.enqueue(first_track, sort_key=10.0)
+    second_queue = queue.enqueue(second_track, sort_key=20.0)
+    priority_queue = queue.enqueue_next(priority_track)
+
+    assert queue.peek_next() is not None
+    assert queue.peek_next()[0].id == priority_queue
+    assert [item.id for item, _track in queue.list_visible()] == [
+        priority_queue,
+        second_queue,
+        first_queue,
+    ]
+
+
+def test_enqueue_immediate_replaces_existing_items_for_same_track(database: Database) -> None:
+    tracks = _tracks(database)
+    queue = _queue(database)
+    track_id = tracks.upsert("youtube0001", "Track", 120)
+    other_track = tracks.upsert("youtube0002", "Other", 120)
+
+    old_pending = queue.enqueue(track_id, sort_key=50.0)
+    old_queued = queue.enqueue(other_track, sort_key=100.0)
+    queue.reserve_next()
+
+    queue_id, skipped = queue.enqueue_immediate(track_id)
+
+    assert skipped == 2
+    assert [(item.id, item.track_id, item.status) for item, _track in queue.list_visible()] == [
+        (queue_id, track_id, "queued"),
+    ]
+    history_ids = {item.id for item, _track in queue.history(limit=10)}
+    assert {old_pending, old_queued}.issubset(history_ids)
+
+
+def test_skip_current_keeps_preloaded_next_item(database: Database) -> None:
+    tracks = _tracks(database)
+    queue = _queue(database)
+    playing_track = tracks.upsert("youtube0001", "Playing", 120)
+    next_track = tracks.upsert("youtube0002", "Next", 120)
+    playing_id = queue.enqueue(playing_track, sort_key=100.0)
+    next_id = queue.enqueue(next_track, sort_key=99.0)
+    queue.mark_playing(playing_id)
+    queue.reserve_next()
+
+    assert queue.skip_current() == 1
+
+    visible = queue.list_visible()
+    assert [(item.id, item.status) for item, _track in visible] == [(next_id, "queued")]
+    assert queue.current_queued() is not None
+    history_ids = {item.id for item, _track in queue.history(limit=10)}
+    assert playing_id in history_ids
+    assert next_id not in history_ids
+
+
 def test_queue_empty_paths(database: Database) -> None:
     tracks = _tracks(database)
     queue = _queue(database)
@@ -203,6 +264,8 @@ def test_queue_sort_collision_paths(database: Database) -> None:
 
     top_inserted = queue.enqueue_next(next_track)
     assert top_inserted > 0
+    assert queue.peek_next() is not None
+    assert queue.peek_next()[0].id == top_inserted
 
 
 def test_offers_repo_paths(database: Database) -> None:
@@ -248,3 +311,13 @@ def test_config_row_mapping(database: Database) -> None:
 
 def test_text_helper_accepts_non_datetime_value() -> None:
     assert _text("raw") == "raw"
+
+
+def test_orm_typing_defensive_helpers() -> None:
+    class CallableRowcount:
+        def rowcount(self) -> int:
+            return 3
+
+    assert rowcount(CallableRowcount()) == 3
+    with pytest.raises(TypeError, match="expected str, got object"):
+        optional_row(object(), str)

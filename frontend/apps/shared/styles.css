@@ -1,0 +1,37 @@
+@import "tailwindcss";
+
+@source "../admin/src/**/*.{ts,tsx}";
+@source "../player/src/**/*.{ts,tsx}";
+@source "../../packages/**/*.{ts,tsx}";
+
+:root {
+  color-scheme: light;
+  font-family: "IBM Plex Sans", Bahnschrift, "Segoe UI", sans-serif;
+  background: #12110d;
+  color: #f7f1df;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: 3px solid #ffd166;
+  outline-offset: 3px;
+}

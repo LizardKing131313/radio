@@ -4,7 +4,6 @@ import asyncio
 import contextlib
 import os
 import re
-import shutil
 from pathlib import Path
 
 from manager.config import AppConfig, get_settings
@@ -43,7 +42,9 @@ class PrefetchWorker:
     async def tick(self) -> None:
         # Холодный кеш живет на PVC. Горячий кеш - маленький рабочий набор, который
         # Liquidsoap смотрит для ближайшего проигрывания.
+        await self._cleanup_staging_cache()
         await self._cleanup_non_audio_cache()
+        await self._reconcile_hot_cache()
         await self._enforce_cold_quota()
         items = self.tracks.get_missing_audio(self.config.prefetch.batch_size)
         await self._process_tracks(items)
@@ -72,22 +73,43 @@ class PrefetchWorker:
             return
 
         cold_path = self.config.paths.cache_cold / f"{track.youtube_id}.opus"
+        hot_path = self.config.paths.cache_hot / cold_path.name
         try:
-            if cold_path.exists():
+            if hot_path.exists():
                 self.metrics.hit()
-                await self._ensure_hot_copy(cold_path)
-                self.tracks.update_track_audio(track_id=track.id, audio_path=str(cold_path))
+                os.utime(hot_path, None)
+                await self._enforce_hot_count()
+                self.tracks.update_track_audio(
+                    track_id=track.id,
+                    audio_path=str(hot_path),
+                    cache_state="hot",
+                )
                 self.blacklist.reset(track.youtube_id)
                 return
 
-            if await self._download_opus(track, cold_path):
-                self.metrics.miss()
-                lufs = await self._measure_lufs(cold_path)
-                await self._ensure_hot_copy(cold_path)
+            if cold_path.exists():
+                self.metrics.hit()
+                cache_path, cache_state = await self._preferred_cache_path(cold_path)
                 self.tracks.update_track_audio(
                     track_id=track.id,
-                    audio_path=str(cold_path),
+                    audio_path=str(cache_path),
+                    cache_state=cache_state,
+                )
+                self.blacklist.reset(track.youtube_id)
+                return
+
+            staging_path = self._staging_dir() / cold_path.name
+            if await self._download_opus(track, staging_path):
+                self.metrics.miss()
+                lufs = await self._measure_lufs(staging_path)
+                cold_path.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(staging_path, cold_path)
+                cache_path, cache_state = await self._preferred_cache_path(cold_path)
+                self.tracks.update_track_audio(
+                    track_id=track.id,
+                    audio_path=str(cache_path),
                     loudness_lufs=lufs,
+                    cache_state=cache_state,
                 )
                 self.blacklist.reset(track.youtube_id)
                 return
@@ -104,6 +126,8 @@ class PrefetchWorker:
             self.tracks.increment_fail_count(track.id)
 
     async def _download_opus(self, track: Track, out_path: Path) -> bool:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        self._cleanup_download_artifacts(track.youtube_id)
         out_template = str(out_path.with_name("%(id)s.%(ext)s"))
         # Поиск идет через YouTube Data API. yt-dlp остается только здесь, где
         # реально нужен аудиофайл.
@@ -142,6 +166,15 @@ class PrefetchWorker:
             return False
         return out_path.exists()
 
+    def _cleanup_download_artifacts(self, youtube_id: str) -> None:
+        # yt-dlp/ffmpeg могут оставлять .tmp/.webm. Staging не смотрит Liquidsoap,
+        # но старые артефакты не должны мешать повторной загрузке того же id.
+        prefix = f"{youtube_id}."
+        for path in iterate_files(self._staging_dir()):
+            if path.name.startswith(prefix):
+                with SuppressTask():
+                    path.unlink()
+
     async def _measure_lufs(self, path: Path) -> float | None:
         # LUFS нужен для будущей нормализации/аналитики; ошибка не блокирует трек.
         code, _out, error = await proc_exec(
@@ -163,20 +196,24 @@ class PrefetchWorker:
         match = re.search(r"I:\s*(-?\d+(?:\.\d+)?)\s*LUFS", error)
         return float(match.group(1)) if match else None
 
-    async def _ensure_hot_copy(self, cold_path: Path) -> Path:
-        # Пишем через tmp + replace, чтобы Liquidsoap не увидел недокопированный файл.
+    async def _preferred_cache_path(self, cold_path: Path) -> tuple[Path, str]:
+        if self.config.prefetch.hot_max_items <= 0:
+            return cold_path, "cold"
+        return await self._promote_to_hot(cold_path), "hot"
+
+    async def _promote_to_hot(self, cold_path: Path) -> Path:
+        # Hot/cold должны быть взаимоисключающими: Liquidsoap читает оба playlist,
+        # поэтому копия в двух папках превращается в повтор одного трека.
         hot_path = self.config.paths.cache_hot / cold_path.name
         hot_path.parent.mkdir(parents=True, exist_ok=True)
         if hot_path.exists():
+            with contextlib.suppress(FileNotFoundError):
+                cold_path.unlink()
             os.utime(hot_path, None)
             await self._enforce_hot_count()
             return hot_path
 
-        temp_path = hot_path.with_suffix(hot_path.suffix + ".tmp")
-        with contextlib.suppress(FileNotFoundError):
-            temp_path.unlink()
-        shutil.copy2(cold_path, temp_path)
-        os.replace(temp_path, hot_path)
+        os.replace(cold_path, hot_path)
         os.utime(hot_path, None)
         await self._enforce_hot_count()
         return hot_path
@@ -186,11 +223,35 @@ class PrefetchWorker:
         # Даже если новых скачиваний в этом tick не было, поднимаем туда свежие
         # cold-файлы после рестарта pod или ручной чистки cache/hot.
         limit = max(0, self.config.prefetch.hot_max_items)
+        await self._reconcile_hot_cache()
         if limit == 0:
             return
+        await self._enforce_hot_count()
+        slots = limit - len(_files_by_mtime(self.config.paths.cache_hot))
+        if slots <= 0:
+            return
         cold_files = list(reversed(_files_by_mtime(self.config.paths.cache_cold)))
-        for path, _mtime, _size in cold_files[:limit]:
-            await self._ensure_hot_copy(path)
+        for path, _mtime, _size in cold_files[:slots]:
+            hot_path = await self._promote_to_hot(path)
+            self.tracks.update_track_cached(
+                youtube_id=path.stem,
+                cache_state="hot",
+                audio_path=str(hot_path),
+            )
+
+    async def _reconcile_hot_cache(self) -> None:
+        for hot_path in iterate_files(self.config.paths.cache_hot):
+            if hot_path.suffix.lower() not in AUDIO_SUFFIXES:
+                continue
+            cold_path = self.config.paths.cache_cold / hot_path.name
+            if cold_path.exists():
+                with SuppressTask():
+                    cold_path.unlink()
+            self.tracks.update_track_cached(
+                youtube_id=hot_path.stem,
+                cache_state="hot",
+                audio_path=str(hot_path),
+            )
 
     async def _cleanup_non_audio_cache(self) -> None:
         # Liquidsoap читает директории как playlist, поэтому рядом с музыкой не
@@ -201,6 +262,13 @@ class PrefetchWorker:
                     continue
                 with SuppressTask():
                     path.unlink()
+
+    async def _cleanup_staging_cache(self) -> None:
+        # Staging находится вне hot/cold, но чистим его между tick, чтобы битые
+        # временные файлы от оборванного yt-dlp не копились на PVC.
+        for path in iterate_files(self._staging_dir()):
+            with SuppressTask():
+                path.unlink()
 
     async def _enforce_cold_quota(self) -> None:
         # Если PVC под холодный кеш переполнен, удаляем самые старые файлы.
@@ -219,16 +287,36 @@ class PrefetchWorker:
         files = _files_by_mtime(self.config.paths.cache_hot)
         overflow = len(files) - self.config.prefetch.hot_max_items
         for index in range(max(0, overflow)):
+            await self._demote_to_cold(files[index][0])
+
+    async def _demote_to_cold(self, hot_path: Path) -> Path:
+        cold_path = self.config.paths.cache_cold / hot_path.name
+        cold_path.parent.mkdir(parents=True, exist_ok=True)
+        if cold_path.exists():
             with SuppressTask():
-                files[index][0].unlink()
+                hot_path.unlink()
+        else:
+            with SuppressTask():
+                os.replace(hot_path, cold_path)
+        if cold_path.exists():
+            self.tracks.update_track_cached(
+                youtube_id=hot_path.stem,
+                cache_state="cold",
+                audio_path=str(cold_path),
+            )
+        return cold_path
 
     def _ensure_dirs(self) -> None:
         for path in (
             self.config.paths.cache_cold,
             self.config.paths.cache_hot,
+            self._staging_dir(),
             self.config.paths.cache_blacklist.parent,
         ):
             path.mkdir(parents=True, exist_ok=True)
+
+    def _staging_dir(self) -> Path:
+        return self.config.paths.cache_cold.parent / "_staging"
 
 
 def _files_by_mtime(directory: Path) -> list[tuple[Path, float, int]]:

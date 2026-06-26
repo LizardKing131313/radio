@@ -8,10 +8,14 @@ ifeq ($(OS),Windows_NT)
 VENV_BIN := $(VENV_DIR)/Scripts
 PY       := python
 NULLDEV  := NUL
+NPM      ?= npm.cmd
+NPX      ?= npx.cmd
 else
 VENV_BIN := $(VENV_DIR)/bin
 PY       := python3
 NULLDEV  := /dev/null
+NPM      ?= npm
+NPX      ?= npx
 endif
 
 PIP      := $(VENV_BIN)/pip
@@ -26,6 +30,8 @@ RUFF     := $(VENV_BIN)/ruff
 BLACK    := $(VENV_BIN)/black
 MYPY     := $(VENV_BIN)/mypy
 PYTEST   := $(VENV_BIN)/pytest
+OPENSPEC ?= $(NPX) --yes @fission-ai/openspec@1.4.1
 
 # Python source roots. Tooling must not walk virtualenvs/caches via ".".
 PY_CODE_DIRS := alembic manager scripts tests
+FRONTEND_DIR := $(ROOT_DIR)/frontend

@@ -66,11 +66,13 @@ ClusterIP Service radio -> pod nginx -> /hls and /api
    `nowplaying.txt(.kv)` от Liquidsoap и отдает расчетный HLS offset,
    `/health` показывает состояние YouTube API quota/errors, `/metrics` отдает
    компактный JSON по трекам, очереди, текущему эфиру и YouTube API. Кнопка
-   админки `Сейчас` вызывает `/tracks/{id}/play-now`: трек пушится напрямую в
-   Liquidsoap и не создает строку в ручной очереди.
-8. `nginx` внутри pod отдает HLS из общего `emptyDir` volume и проксирует
-   `/api/` в FastAPI-контейнер. Снаружи к нему ведет `ingress-nginx` через
-   внутренний `ClusterIP` Service.
+   админки `Играть сейчас` вызывает `/tracks/{id}/play-now`: трек получает
+   `queue_id`, помечается как `queued`, пушится в Liquidsoap и вытесняет старый
+   active item.
+8. `nginx` внутри pod отдает HLS из общего `emptyDir` volume, проксирует
+   `/api/` в FastAPI-контейнер и отправляет web routes `/player`, `/admin`,
+   manifest, service worker и static assets в тот же FastAPI static surface.
+   Снаружи к нему ведет `ingress-nginx` через внутренний `ClusterIP` Service.
 9. `postgres-backup` CronJob раз в сутки делает `pg_dump -Fc` в
    `radio-cache/postgres` и чистит дампы старше 14 дней.
 10. `LimitRange radio-defaults` задает дефолтные `requests/limits` для всех
@@ -155,7 +157,8 @@ https://RADIO_EDGE_DOMAIN/api/health
 https://RADIO_EDGE_DOMAIN/api/current
 https://RADIO_EDGE_DOMAIN/api/metrics
 https://RADIO_EDGE_DOMAIN/api/metrics/prometheus
-https://RADIO_EDGE_DOMAIN/api/admin
+https://RADIO_EDGE_DOMAIN/player
+https://RADIO_EDGE_DOMAIN/admin
 ```
 
 Без edge используй те же пути на `RADIO_DOMAIN`.
@@ -172,11 +175,25 @@ http://127.0.0.1:30080/api/health
 http://127.0.0.1:30080/api/current
 http://127.0.0.1:30080/api/metrics
 http://127.0.0.1:30080/api/metrics/prometheus
-http://127.0.0.1:30080/api/admin
+http://127.0.0.1:30080/player
+http://127.0.0.1:30080/admin
 ```
 
-HLS лучше открывать в VLC/mpv. Браузер может не проигрывать `.m3u8` напрямую.
+Плеер использует HLS `/hls/mp4/playlist.m3u8`: браузеры с native HLS играют
+напрямую, остальные получают frontend fallback. HLS всё ещё можно открывать в
+VLC/mpv через `/hls/ts/playlist.m3u8` или `/hls/mp4/playlist.m3u8`.
 Админка использует `RADIO_ADMIN_TOKEN` из локального `deploy/k8s/secret.yaml`.
+
+Frontend source живет в `frontend/`. Для локальной проверки web-кода:
+
+```bash
+cd frontend
+npm install
+npm run check
+```
+
+Production Docker build сам выполняет `npm ci` и копирует `frontend/dist` в
+`/opt/radio/www/html`; отдельного Node runtime контейнера нет.
 
 ## Как смотреть БД
 

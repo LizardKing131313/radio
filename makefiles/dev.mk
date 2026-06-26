@@ -12,6 +12,13 @@ help-dev:
 	@echo "  test-all  			 - run all pytest"
 	@echo "  coverage  			 - run all pytest with coverage"
 	@echo "  coverage-badge  - generate coverage badge"
+	@echo "  frontend-install - install frontend npm dependencies"
+	@echo "  frontend-typecheck - run frontend TypeScript type checks"
+	@echo "  frontend-format  - check frontend Prettier formatting"
+	@echo "  frontend-lint    - run frontend ESLint and Stylelint"
+	@echo "  frontend-build   - build player/admin frontend"
+	@echo "  frontend-test    - run frontend tests"
+	@echo "  frontend-check   - run frontend typecheck, format, lint, tests and build"
 	@echo "  ci  						 - run specs, linter, typecheck and tests"
 
 # ---- DEV ---------------------------------------------------------------------
@@ -31,7 +38,7 @@ typecheck:
 
 .PHONY: spec
 spec:
-	cd "$(ROOT_DIR)" && openspec validate --all --strict --no-interactive
+	cd "$(ROOT_DIR)" && $(OPENSPEC) validate --all --strict --no-interactive
 
 .PHONY: test
 test:
@@ -49,5 +56,32 @@ coverage:
 coverage-badge:
 	cd "$(ROOT_DIR)" && "$(PYTHON)" scripts/badge/gen_badge.py
 
+.PHONY: frontend-install
+frontend-install:
+	cd "$(FRONTEND_DIR)" && $(NPM) install
+
+.PHONY: frontend-typecheck
+frontend-typecheck:
+	cd "$(FRONTEND_DIR)" && $(NPM) run typecheck
+
+.PHONY: frontend-format
+frontend-format:
+	cd "$(FRONTEND_DIR)" && $(NPM) run format:check
+
+.PHONY: frontend-lint
+frontend-lint:
+	cd "$(FRONTEND_DIR)" && $(NPM) run lint
+
+.PHONY: frontend-test
+frontend-test:
+	cd "$(FRONTEND_DIR)" && $(NPM) test
+
+.PHONY: frontend-build
+frontend-build:
+	cd "$(FRONTEND_DIR)" && $(NPM) run build
+
+.PHONY: frontend-check
+frontend-check: frontend-typecheck frontend-format frontend-lint frontend-test frontend-build
+
 .PHONY: ci
-ci: spec lint typecheck test
+ci: spec lint typecheck test frontend-check

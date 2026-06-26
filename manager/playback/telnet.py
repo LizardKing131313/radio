@@ -29,16 +29,43 @@ class LiquidsoapTelnetClient:
     def push_request(self, uri: str) -> str:
         return self.command(f"request_queue.push {uri}")
 
+    def push_play_now(self, uri: str) -> str:
+        return self.command(f"play_now.push {uri}")
+
     def skip_output(self) -> str:
-        # output.file.skip есть у текущего WAV output и двигает фактический эфир.
+        # output.file.skip есть у WAV output, но playlist sources требуют своих skip-команд.
         return self.command("output.file.skip")
+
+    def skip_request_queue(self) -> str:
+        return self.command("request_queue.skip")
+
+    def skip_play_now(self) -> str:
+        return self.command("play_now.skip")
+
+    def skip_library_sources(self) -> list[str]:
+        responses: list[str] = []
+        errors: list[LiquidsoapTelnetError] = []
+        for command in ("playlist.skip", "playlist.1.skip"):
+            try:
+                responses.append(self.command(command))
+            except LiquidsoapTelnetError as exception:
+                errors.append(exception)
+        if not responses and errors:
+            raise errors[0]
+        return responses
 
     def flush_request_queue(self) -> str:
         # Нужен, когда item уже queued в Liquidsoap, но еще не начал играть.
         return self.command("request_queue.flush_and_skip")
 
+    def flush_play_now(self) -> str:
+        return self.command("play_now.flush")
+
     def queue_requests(self) -> str:
         return self.command("request_queue.queue")
+
+    def play_now_status(self) -> str:
+        return self.command("play_now.status")
 
 
 def _read_response(connection: socket.socket) -> str:
