@@ -4,7 +4,7 @@
 #
 #    pip-compile --extra=dev --output-file=requirements-dev.txt pyproject.toml
 #
-alembic==1.18.4
+alembic==1.18.5
     # via radio_manager (pyproject.toml)
 annotated-doc==0.0.4
     # via fastapi
@@ -12,7 +12,7 @@ annotated-types==0.7.0
     # via pydantic
 anybadge==1.16.0
     # via radio_manager (pyproject.toml)
-anyio==4.14.0
+anyio==4.14.1
     # via
     #   httpx
     #   starlette
@@ -35,7 +35,7 @@ cfgv==3.5.0
     # via pre-commit
 charset-normalizer==3.4.7
     # via requests
-click==8.4.1
+click==8.4.2
     # via
     #   black
     #   uvicorn
@@ -49,14 +49,14 @@ defusedxml==0.7.1
     # via py-serializable
 distlib==0.4.3
     # via virtualenv
-fastapi==0.138.0
+fastapi==0.138.1
     # via radio_manager (pyproject.toml)
 filelock==3.29.4
     # via
     #   cachecontrol
     #   python-discovery
     #   virtualenv
-greenlet==3.5.2
+greenlet==3.5.3
     # via sqlalchemy
 h11==0.16.0
     # via
@@ -174,7 +174,7 @@ requests==2.34.2
     #   pip-audit
 rich==15.0.0
     # via pip-audit
-ruff==0.15.18
+ruff==0.15.20
     # via radio_manager (pyproject.toml)
 sortedcontainers==2.4.0
     # via cyclonedx-python-lib
