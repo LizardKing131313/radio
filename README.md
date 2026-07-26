@@ -32,7 +32,7 @@ PostgreSQL schema is managed by Alembic from `alembic/versions`.
 Search uses YouTube Data API; downloads still use `yt-dlp`.
 FastAPI is exposed under `/api/`; `/current` includes Liquidsoap nowplaying plus HLS offset, `/health` includes YouTube
 API telemetry, `/metrics` returns compact runtime JSON, `/metrics/prometheus` returns Prometheus exposition, and admin
-mutations require `RADIO_ADMIN_TOKEN`.
+admin data and mutations require a server-side admin session from `/admin`.
 The public player is served at `/player` as an installable PWA, and the admin shell is served at `/admin`.
 Kubernetes owns runtime process restarts: search, prefetch, queue-player, API, Liquidsoap, FFmpeg and Nginx are separate
 containers in the `radio` pod.

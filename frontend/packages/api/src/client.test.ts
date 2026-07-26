@@ -1,6 +1,6 @@
 import {describe, expect, it, vi} from "vitest";
 
-import {MissingAdminTokenError, RadioApiClient} from "./client";
+import {RadioApiClient} from "./client";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -16,10 +16,9 @@ describe("RadioApiClient", () => {
 
     await client.tracks({q: " track ", status: "downloaded", limit: 10});
 
-    expect(fetcher).toHaveBeenCalledWith(
-      "/edge/api/tracks?status=downloaded&limit=10&q=track",
-      undefined
-    );
+    expect(fetcher).toHaveBeenCalledWith("/edge/api/tracks?status=downloaded&limit=10&q=track", {
+      credentials: "same-origin"
+    });
   });
 
   it("calls fetchers without binding them to the client instance", async () => {
@@ -38,31 +37,34 @@ describe("RadioApiClient", () => {
     expect(called).toBe(true);
   });
 
-  it("sends bearer headers for admin mutations", async () => {
+  it("uses the session cookie for admin mutations", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({queue_id: 7}));
-    const client = new RadioApiClient({
-      fetcher,
-      tokenProvider: () => "secret-token"
-    });
+    const client = new RadioApiClient({fetcher});
 
     await client.enqueueNext({track_id: 42});
 
     expect(fetcher).toHaveBeenCalledWith("/api/queue/append/admin", {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer secret-token"
+        "Content-Type": "application/json"
       },
-      body: '{"track_id":42}'
+      body: '{"track_id":42}',
+      credentials: "same-origin"
     });
   });
 
-  it("rejects admin mutations without token before fetch", async () => {
-    const fetcher = vi.fn<typeof fetch>();
-    const client = new RadioApiClient({fetcher, tokenProvider: () => ""});
+  it("logs in through the session endpoint", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({status: "ok"}));
+    const client = new RadioApiClient({fetcher});
 
-    await expect(client.skip()).rejects.toBeInstanceOf(MissingAdminTokenError);
-    expect(fetcher).not.toHaveBeenCalled();
+    await client.login("admin", "password");
+
+    expect(fetcher).toHaveBeenCalledWith("/api/auth/login", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: '{"username":"admin","password":"password"}',
+      credentials: "same-origin"
+    });
   });
 
   it("raises API errors with status and body", async () => {

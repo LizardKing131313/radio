@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /api/
+Disallow: /hls/
+
+Sitemap: https://govnovoz-fm.fun/sitemap.xml

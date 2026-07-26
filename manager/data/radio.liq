@@ -12,25 +12,29 @@ hot_dir      = "/opt/radio/cache/hot"
 cold_dir     = "/opt/radio/cache/cold"
 fifo_wav     = "/opt/radio/runtime/fifo/radio.wav"
 np_txt_file  = "/opt/radio/runtime/info/nowplaying.txt"
+jingles_dir  = "/opt/radio/jingles"
 
 # --- Источники треков
 queue_source = request.queue()
 hot  = playlist(mode="random", reload_mode="watch", hot_dir)
 cold = playlist(mode="random", reload_mode="watch", cold_dir)
+jingles = playlist(mode="random", reload_mode="watch", jingles_dir)
+play_now_jingles = playlist(mode="random", reload_mode="watch", jingles_dir)
 
 # Не используем fallback(hot, cold): если hot непустой, cold вообще не играет.
 # rotate держит hot как приоритетный короткий набор, но основную ротацию берет
 # из полного cold-каталога.
 library = rotate(weights=[1, 4], transition_length=0.0, [hot, cold])
+# A random jingle is selected roughly once per three library tracks.
+library_with_jingles = rotate(weights=[2, 1], transition_length=0.0, [library, jingles])
 # Обычная очередь не обрывает текущий трек.
-scheduled = fallback(track_sensitive=true, [queue_source, library])
+scheduled = fallback(track_sensitive=true, [queue_source, library_with_jingles])
 scheduled = stereo(scheduled)
 
 # --- Обработка звука без внешних плагинов
 scheduled = normalize(target=-14.0, scheduled)
-# 6 секунд резали хвост трека слишком рано. 2 секунды дают мягкий стык без
-# заметного преждевременного переключения.
-scheduled = crossfade(duration=2.0, fade_in=1.5, fade_out=1.5, scheduled)
+# Normal broadcast mode: transitions happen at track boundaries.
+scheduled = crossfade(duration=8.0, fade_in=6.0, fade_out=6.0, scheduled)
 
 # play-now не делаем вторым request.queue: request.queue становится not ready
 # сразу после забора request в current и fallback уходит назад в library.
@@ -50,6 +54,7 @@ def play_now_next() =
     play_now_pending := false
     play_now_active := true
     request_source = request.once(request.create(null.get(uri)))
+    request_source = sequence([play_now_jingles, request_source])
     request_source = stereo(request_source)
     request_source = normalize(target=-14.0, request_source)
     request_source = source.on_end(delay={0.0}, request_source, play_now_done)
@@ -64,7 +69,6 @@ play_now = source.dynamic(id="play_now", track_sensitive=false, play_now_next)
 def play_now_push(uri) =
   play_now_uri := null(uri)
   play_now_pending := true
-  source.skip(scheduled)
   source.skip(play_now)
   "Queued"
 end
@@ -96,7 +100,17 @@ server.register(namespace="play_now", description="Skip current play-now source.
 server.register(namespace="play_now", description="Clear pending/current play-now source.", "flush", play_now_flush)
 server.register(namespace="play_now", description="Return play-now state.", "status", play_now_status)
 
-base = fallback(track_sensitive=false, transition_length=0.0, [play_now, scheduled])
+# Smoothly switch between a manual track and the regular broadcast without
+# creating a second clock around request.queue().
+base = fallback(
+  track_sensitive=false,
+  transition_length=8.0,
+  transitions=[
+    fun (old, new) -> cross.simple(fade_in=6.0, fade_out=6.0, old, new),
+    fun (old, new) -> cross.simple(fade_in=6.0, fade_out=6.0, old, new)
+  ],
+  [play_now, scheduled]
+)
 
 # --- Резервный хвост: тишина вместо падения, если плейлисты пустые
 silence = blank(duration=0.5)

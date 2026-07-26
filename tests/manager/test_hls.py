@@ -29,15 +29,17 @@ def test_build_ffmpeg_hls_args(tmp_path: Path) -> None:
 
     args = hls.build_ffmpeg_hls_args(cfg)
 
-    assert args[:7] == [
+    assert args[:8] == [
         "-nostdin",
         "-hide_banner",
         "-loglevel",
         "warning",
+        "-fflags",
+        "+discardcorrupt",
         "-i",
         str(cfg.paths.fifo_audio_path),
-        "-map",
     ]
+    assert args[8] == "-map"
     assert args.count("-f") == 2
     assert args.count("hls") == 2
     assert args.count("-map") == 4

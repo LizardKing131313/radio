@@ -1,24 +1,36 @@
 {
-  "name": "Radio Player",
-  "short_name": "Radio",
-  "description": "Installable online radio player.",
+  "name": "Громкий эфир",
+  "short_name": "Громкий эфир",
+  "description": "Онлайн-радио Громкий эфир.",
   "start_url": "/player",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#12110d",
-  "theme_color": "#12110d",
+  "background_color": "#10343C",
+  "theme_color": "#10343C",
   "icons": [
     {
-      "src": "/icons/icon-192.svg",
+      "src": "/android-chrome-192x192.png",
       "sizes": "192x192",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
-      "src": "/icons/icon-512.svg",
+      "src": "/android-chrome-512x512.png",
       "sizes": "512x512",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/android-chrome-192x192-maskable.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/android-chrome-512x512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

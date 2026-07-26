@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from manager.api.dependencies import get_database, lifespan, require_admin_token
+from manager.api.dependencies import get_database, lifespan, require_admin_session
 from manager.api.routes import (
     queued_play_uri as _queued_play_uri,
     remove_track_files as _remove_track_files,
@@ -21,6 +21,6 @@ __all__ = [
     "_safe_web_path",
     "app",
     "get_database",
-    "require_admin_token",
+    "require_admin_session",
     "track_play_now",
 ]

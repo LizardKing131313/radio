@@ -18,17 +18,9 @@ export class ApiError extends Error {
   }
 }
 
-export class MissingAdminTokenError extends Error {
-  constructor() {
-    super("Введите admin token");
-    this.name = "MissingAdminTokenError";
-  }
-}
-
 export interface RadioApiClientOptions {
   baseUrl?: string;
   fetcher?: typeof fetch;
-  tokenProvider?: () => string | null | undefined;
 }
 
 export interface TrackListOptions {
@@ -40,13 +32,27 @@ export interface TrackListOptions {
 export class RadioApiClient {
   private readonly baseUrl: string;
   private readonly fetcher: typeof fetch;
-  private readonly tokenProvider: () => string | null | undefined;
 
   constructor(options: RadioApiClientOptions = {}) {
     const fetcher = options.fetcher ?? globalThis.fetch.bind(globalThis);
     this.baseUrl = options.baseUrl ?? "/api";
-    this.fetcher = (input, init) => fetcher(input, init);
-    this.tokenProvider = options.tokenProvider ?? (() => undefined);
+    this.fetcher = (input, init) => fetcher(input, {...init, credentials: "same-origin"});
+  }
+
+  login(username: string, password: string): Promise<{ status: string }> {
+    return this.request("/auth/login", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({username, password})
+    });
+  }
+
+  session(): Promise<{ status: string }> {
+    return this.get("/auth/me");
+  }
+
+  logout(): Promise<{ status: string }> {
+    return this.request("/auth/logout", {method: "POST"});
   }
 
   current(): Promise<CurrentResponse> {
@@ -116,17 +122,10 @@ export class RadioApiClient {
     return this.request(path);
   }
 
-  private async post<T>(path: string, body?: unknown, authorized = false): Promise<T> {
+  private async post<T>(path: string, body?: unknown, _authorized = false): Promise<T> {
     const headers: Record<string, string> = {};
     if (body !== undefined) {
       headers["Content-Type"] = "application/json";
-    }
-    if (authorized) {
-      const token = this.tokenProvider()?.trim();
-      if (!token) {
-        throw new MissingAdminTokenError();
-      }
-      headers["Authorization"] = `Bearer ${token}`;
     }
     const init: RequestInit = {
       method: "POST",

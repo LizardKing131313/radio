@@ -4,6 +4,37 @@ export interface HlsAttachment {
 
 const HLS_MIME = "application/vnd.apple.mpegurl";
 
+export const HLS_OPTIONS = {
+  lowLatencyMode: false,
+  liveSyncDurationCount: 6,
+  liveMaxLatencyDurationCount: 14,
+  maxLiveSyncPlaybackRate: 1.25,
+  maxBufferLength: 30,
+  backBufferLength: 30
+} as const;
+
+export function recoverFatalHlsError(
+  hls: { startLoad: () => void; recoverMediaError: () => void; destroy: () => void },
+  audio: HTMLAudioElement,
+  data: { fatal?: boolean; type: string },
+  errorTypes: { NETWORK_ERROR: string; MEDIA_ERROR: string }
+) {
+  if (!data.fatal) {
+    return;
+  }
+  if (data.type === errorTypes.NETWORK_ERROR) {
+    hls.startLoad();
+    return;
+  }
+  if (data.type === errorTypes.MEDIA_ERROR) {
+    hls.recoverMediaError();
+    return;
+  }
+  hls.destroy();
+  audio.removeAttribute("src");
+  audio.load();
+}
+
 export async function attachHls(
   audio: HTMLAudioElement,
   streamUrl: string
@@ -24,11 +55,12 @@ export async function attachHls(
   }
 
   const hls = new Hls({
-    lowLatencyMode: true,
-    liveSyncDurationCount: 2,
-    liveMaxLatencyDurationCount: 4,
-    maxLiveSyncPlaybackRate: 1.25,
-    backBufferLength: 10
+    // Keep enough live buffer for the edge/Cloudflare hop; ultra-low latency
+    // stalls when a playlist refresh arrives a little late.
+    ...HLS_OPTIONS
+  });
+  hls.on(Hls.Events.ERROR, (_event, data) => {
+    recoverFatalHlsError(hls, audio, data, Hls.ErrorTypes);
   });
   hls.loadSource(streamUrl);
   hls.attachMedia(audio);

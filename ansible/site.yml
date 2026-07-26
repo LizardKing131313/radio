@@ -18,7 +18,7 @@
   become: true
   vars:
     radio_local_vars_file: "{{ playbook_dir }}/local-vars.yml"
-    radio_generated_dir: "{{ playbook_dir }}/.generated"
+    radio_local_secret_manifest: "{{ playbook_dir }}/../deploy/k8s/secret.yaml"
     radio_secret_manifest: "{{ radio_app_dir }}/deploy/k8s/secret.yaml"
     radio_issuer_manifest: "{{ radio_app_dir }}/deploy/k8s/issuer.yaml"
     radio_ingress_manifest: "{{ radio_app_dir }}/deploy/k8s/ingress.yaml"
@@ -43,32 +43,41 @@
           - ansible_os_family == "Debian"
         fail_msg: "This playbook supports Debian/Ubuntu VPS images."
 
-    - name: Create local directory for generated secrets
-      ansible.builtin.file:
-        path: "{{ radio_generated_dir }}"
-        state: directory
-        mode: "0700"
+    - name: Check manually managed Kubernetes Secret
+      ansible.builtin.stat:
+        path: "{{ radio_local_secret_manifest }}"
       delegate_to: localhost
       become: false
+      register: radio_local_secret_manifest_stat
 
-    - name: Resolve secrets from env or generated local files
-      ansible.builtin.set_fact:
-        radio_effective_postgres_password: >-
-          {{
-            radio_postgres_password
-            | default(lookup(
-              'ansible.builtin.password',
-              radio_generated_dir + '/postgres_password length=32 chars=ascii_letters,digits'
-            ), true)
-          }}
-        radio_effective_admin_token: >-
-          {{
-            radio_admin_token
-            | default(lookup(
-              'ansible.builtin.password',
-              radio_generated_dir + '/admin_token length=48 chars=ascii_letters,digits'
-            ), true)
-          }}
+    - name: Refuse deployment without manually managed Kubernetes Secret
+      ansible.builtin.assert:
+        that:
+          - radio_local_secret_manifest_stat.stat.exists
+          - radio_local_secret_manifest_stat.stat.isreg
+        fail_msg: "Create deploy/k8s/secret.yaml manually before running Ansible."
+
+    - name: Read manually managed Kubernetes Secret
+      ansible.builtin.slurp:
+        src: "{{ radio_local_secret_manifest }}"
+      delegate_to: localhost
+      become: false
+      register: radio_local_secret_manifest_blob
+      no_log: true
+
+    - name: Validate manually managed Kubernetes Secret keys
+      ansible.builtin.assert:
+        that:
+          - radio_local_secret_manifest_blob.content | b64decode is search('POSTGRES_DB:')
+          - radio_local_secret_manifest_blob.content | b64decode is search('POSTGRES_USER:')
+          - radio_local_secret_manifest_blob.content | b64decode is search('POSTGRES_PASSWORD:')
+          - radio_local_secret_manifest_blob.content | b64decode is search('RADIO_DATABASE_DSN:')
+          - radio_local_secret_manifest_blob.content | b64decode is search('RADIO_YOUTUBE_API_KEY:')
+          - radio_local_secret_manifest_blob.content | b64decode is search('RADIO_ADMIN_USERNAME:')
+          - radio_local_secret_manifest_blob.content | b64decode is search('RADIO_ADMIN_PASSWORD:')
+          - radio_local_secret_manifest_blob.content | b64decode is not search('change-me')
+          - radio_local_secret_manifest_blob.content | b64decode is not search('change-this')
+        fail_msg: "Fill all runtime secret values manually in deploy/k8s/secret.yaml."
       no_log: true
 
     - name: Read SSH public keys from controller files
@@ -94,14 +103,12 @@
         fail_msg: "Set radio_authorized_key_files/radio_authorized_keys before disabling SSH password login."
       when: radio_harden_ssh | bool
 
-    - name: Validate required public settings and YouTube key
+    - name: Validate required public settings
       ansible.builtin.assert:
         that:
-          - radio_youtube_api_key | length > 0
-          - radio_youtube_api_key != "change-me"
           - radio_domain | length > 0
           - radio_tls_email | length > 0
-        fail_msg: "Set RADIO_YOUTUBE_API_KEY, RADIO_DOMAIN and RADIO_TLS_EMAIL before running Ansible."
+        fail_msg: "Set RADIO_DOMAIN and RADIO_TLS_EMAIL before running Ansible."
 
     - name: Install base packages
       ansible.builtin.apt:
@@ -146,7 +153,7 @@
         shell: /bin/bash
         create_home: true
         groups: "{{ 'sudo' if radio_passwordless_sudo | bool else omit }}"
-        append: true
+        append: "{{ radio_passwordless_sudo | bool }}"
         state: present
 
     - name: Allow passwordless sudo for radio user
@@ -269,19 +276,27 @@
         path: /usr/local/bin/k3s
       register: radio_k3s_binary
 
+    - name: Check k3s service unit
+      ansible.builtin.command: systemctl cat k3s
+      register: radio_k3s_service
+      changed_when: false
+      failed_when: false
+
     - name: Download k3s installer
       ansible.builtin.get_url:
         url: https://get.k3s.io
         dest: /tmp/install-k3s.sh
         mode: "0755"
-      when: not radio_k3s_binary.stat.exists or radio_k3s_reconfigure | bool
+      when: >-
+        not radio_k3s_binary.stat.exists or
+        radio_k3s_reconfigure | bool or
+        radio_k3s_service.rc != 0
 
     - name: Install or reconfigure k3s
       ansible.builtin.command: /tmp/install-k3s.sh
       environment:
         INSTALL_K3S_CHANNEL: "{{ k3s_channel }}"
         INSTALL_K3S_EXEC: "{{ k3s_exec }}"
-      when: not radio_k3s_binary.stat.exists or radio_k3s_reconfigure | bool
 
     - name: Ensure k3s is running
       ansible.builtin.systemd:
@@ -373,30 +388,13 @@
         group: "{{ radio_user }}"
         recurse: true
 
-    - name: Write Kubernetes Secret manifest on the VPS
+    - name: Copy manually managed Kubernetes Secret manifest to the VPS
       ansible.builtin.copy:
+        src: "{{ radio_local_secret_manifest }}"
         dest: "{{ radio_secret_manifest }}"
         owner: "{{ radio_user }}"
         group: "{{ radio_user }}"
         mode: "0600"
-        content: |
-          apiVersion: v1
-          kind: Secret
-          metadata:
-            name: radio-secrets
-          type: Opaque
-          stringData:
-            POSTGRES_DB: {{ radio_postgres_db | quote }}
-            POSTGRES_USER: {{ radio_postgres_user | quote }}
-            POSTGRES_PASSWORD: {{ radio_effective_postgres_password | quote }}
-            RADIO_DATABASE_DSN: {{ radio_database_dsn | quote }}
-            RADIO_YOUTUBE_API_KEY: {{ radio_youtube_api_key | quote }}
-            RADIO_ADMIN_TOKEN: {{ radio_effective_admin_token | quote }}
-      vars:
-        radio_database_dsn: >-
-          postgresql://{{ radio_postgres_user }}:{{ radio_effective_postgres_password | urlencode
-          }}@postgres:5432/{{ radio_postgres_db }}
-      no_log: true
 
     - name: Write cert-manager Issuer manifest on the VPS
       ansible.builtin.template:
@@ -415,7 +413,7 @@
         mode: "0644"
 
     - name: Build application image on the VPS
-      ansible.builtin.command: "docker build -t {{ radio_image }} -f docker/app/Dockerfile ."
+      ansible.builtin.command: "docker build --no-cache -t {{ radio_image }} -f docker/app/Dockerfile ."
       args:
         chdir: "{{ radio_app_dir }}"
 
@@ -438,6 +436,10 @@
       args:
         chdir: "{{ radio_app_dir }}"
 
+    - name: Restart radio deployment after importing application image
+      ansible.builtin.command: k3s kubectl -n radio rollout restart deployment/radio
+      changed_when: true
+
     - name: Wait for Alembic migrations
       ansible.builtin.command: k3s kubectl -n radio wait --for=condition=complete job/alembic --timeout=180s
       changed_when: false
@@ -451,7 +453,7 @@
         msg:
           - "Radio URL: https://{{ radio_domain }}"
           - "Status: ssh root@HOST 'k3s kubectl -n radio get pods,svc'"
-          - "Admin token file: {{ radio_generated_dir }}/admin_token unless RADIO_ADMIN_TOKEN was set."
+          - "Admin credentials are managed in deploy/k8s/secret.yaml."
 
 - name: Configure Russian edge nginx proxy
   hosts: vps_edge
@@ -478,16 +480,16 @@
 
     - name: Resolve edge proxy settings
       ansible.builtin.set_fact:
-        radio_edge_effective_domain: "{{ radio_edge_domain | default('', true) | trim }}"
-        radio_edge_effective_tls_email: "{{ radio_edge_tls_email | default('', true) | trim }}"
-        radio_edge_effective_origin_host: "{{ radio_edge_origin_host | default('', true) | trim }}"
+        radio_edge_effective_domain: "{{ radio_edge_domain_override | default(radio_edge_domain, true) | default('', true) | trim }}"
+        radio_edge_effective_tls_email: "{{ radio_edge_tls_email_override | default(radio_edge_tls_email, true) | default('', true) | trim }}"
+        radio_edge_effective_origin_host: "{{ radio_edge_origin_host_override | default(radio_edge_origin_host, true) | default('', true) | trim }}"
 
     - name: Resolve edge origin URL
       ansible.builtin.set_fact:
         radio_edge_effective_origin_url: >-
           {{
-            (radio_edge_origin_url | default('', true) | trim | regex_replace('/+$', ''))
-            if ((radio_edge_origin_url | default('', true) | trim | length) > 0)
+            ((radio_edge_origin_url_override | default(radio_edge_origin_url, true) | default('', true) | trim) | regex_replace('/+$', ''))
+            if (((radio_edge_origin_url_override | default(radio_edge_origin_url, true) | default('', true) | trim) | length) > 0)
             else ('https://' ~ radio_edge_effective_origin_host)
           }}
 
@@ -576,16 +578,26 @@
       register: radio_edge_sshd_hardening
       when: radio_harden_ssh | bool
 
+    - name: Remove legacy SSH listener on HTTPS port
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^Port[ \\t]+443[ \\t]*$'
+        state: absent
+      register: radio_edge_legacy_ssh_port
+
     - name: Validate SSH configuration on edge
       ansible.builtin.command: /usr/sbin/sshd -t
       changed_when: false
       when: radio_harden_ssh | bool
 
-    - name: Reload SSH after edge hardening
+    - name: Reload SSH socket after edge hardening
       ansible.builtin.systemd:
-        name: ssh
-        state: reloaded
-      when: radio_harden_ssh | bool and radio_edge_sshd_hardening.changed
+        name: ssh.socket
+        state: restarted
+        daemon_reload: true
+      when: >-
+        radio_harden_ssh | bool and
+        (radio_edge_sshd_hardening.changed or radio_edge_legacy_ssh_port.changed)
 
     - name: Create ACME webroot
       ansible.builtin.file:
@@ -608,6 +620,20 @@
         path: /etc/nginx/sites-enabled/default
         state: absent
       register: radio_edge_default_site
+
+    - name: Find legacy nginx sites on edge
+      ansible.builtin.find:
+        paths: /etc/nginx/sites-enabled
+        file_type: any
+        recurse: false
+      register: radio_edge_legacy_sites
+
+    - name: Remove legacy nginx sites on edge
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ radio_edge_legacy_sites.files }}"
+      register: radio_edge_legacy_sites_removed
 
     - name: Allow required TCP ports in UFW on edge
       ansible.builtin.command: "ufw allow {{ item }}/tcp"
@@ -740,6 +766,7 @@
       when: >-
         radio_edge_nginx_template.changed or
         radio_edge_default_site.changed or
+        radio_edge_legacy_sites_removed.changed or
         (radio_edge_certbot is defined and radio_edge_certbot.changed)
 
     - name: Show edge URL and origin

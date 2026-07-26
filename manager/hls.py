@@ -13,6 +13,8 @@ def build_ffmpeg_hls_args(config: AppConfig) -> list[str]:
         "-hide_banner",
         "-loglevel",
         "warning",
+        "-fflags",
+        "+discardcorrupt",
         "-i",
         str(config.paths.fifo_audio_path),
         *audio_args,

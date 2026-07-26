@@ -1,15 +1,13 @@
 ## Purpose
 
-Defines how manual queue entries become audible playback. PostgreSQL is the
-source of truth for queue state, while Liquidsoap request.queue is the playback
-integration point.
+Defines how manual queue entries become audible playback. PostgreSQL is the source of truth for queue state, while
+Liquidsoap request.queue is the playback integration point.
 
 ## Requirements
 
 ### Requirement: Queue state synchronization
 
-The queue-player worker SHALL synchronize PostgreSQL queue entries with
-Liquidsoap request.queue metadata.
+The queue-player worker SHALL synchronize PostgreSQL queue entries with Liquidsoap request.queue metadata.
 
 #### Scenario: Pending entry is queued
 
@@ -28,8 +26,7 @@ Liquidsoap request.queue metadata.
 
 ### Requirement: Queue failure visibility
 
-Queue playback failures MUST be persisted in PostgreSQL instead of being hidden
-in logs only.
+Queue playback failures MUST be persisted in PostgreSQL instead of being hidden in logs only.
 
 #### Scenario: Missing audio file
 
@@ -38,8 +35,8 @@ in logs only.
 
 ### Requirement: Track-sensitive playback
 
-Manual queue playback SHALL avoid interrupting the currently playing track unless
-an explicit admin skip command is used.
+Manual queue playback SHALL avoid interrupting the currently playing track unless an explicit admin skip command is
+used.
 
 #### Scenario: Admin appends track
 
@@ -50,3 +47,13 @@ an explicit admin skip command is used.
 
 - **WHEN** an admin uses the skip control
 - **THEN** the API sends the configured Liquidsoap telnet command and records the observable queue result
+
+### Requirement: Play-now jingle
+
+An explicit play-now request SHALL be preceded by one random bundled jingle before the requested track starts.
+
+#### Scenario: Admin starts a track immediately
+
+- **WHEN** an admin uses the play-now control for a playable track
+- **THEN** Liquidsoap plays one randomly selected jingle first
+- **AND** Liquidsoap plays the requested track after the jingle completes

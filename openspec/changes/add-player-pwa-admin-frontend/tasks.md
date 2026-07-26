@@ -51,4 +51,4 @@
 - [x] 6.1 Run `openspec validate --all --strict --no-interactive`.
 - [x] 6.2 Run frontend build, lint/typecheck, and test commands.
 - [x] 6.3 Run focused Python tests for API/static routing.
-- [ ] 6.4 Run `make ci`.
+- [x] 6.4 Run `make ci`.

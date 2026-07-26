@@ -5,27 +5,41 @@ K8S_NAMESPACE ?= radio
 K8S_DEPLOYMENT ?= radio
 K8S_APPLY_PATH ?= deploy
 KUBECTL ?= kubectl
+ifeq ($(OS),Windows_NT)
+DOCKER ?= docker.exe
+else
+DOCKER ?= docker
+endif
 
 RADIO_IMAGE ?= radio-manager:latest
-RADIO_IMAGE_TAR ?= $(ROOT_DIR)/.tmp/radio-manager.tar
+ifneq ($(findstring /mnt/c/,$(ROOT_DIR)),)
+K8S_FS_ROOT := $(ROOT_DIR)
+K8S_WIN_ROOT := $(subst /mnt/c/,C:/,$(ROOT_DIR))
+else
+K8S_FS_ROOT := $(subst /c/,/mnt/c/,$(ROOT_DIR))
+K8S_WIN_ROOT := $(subst /c/,C:/,$(ROOT_DIR))
+endif
+RADIO_IMAGE_TAR ?= $(K8S_FS_ROOT)/.tmp/radio-manager.tar
+RADIO_IMAGE_TAR_WIN := $(K8S_WIN_ROOT)/.tmp/radio-manager.tar
 
 RADIO_HTTP_PORT ?= 30080
 RADIO_API_PORT ?= 18000
 RADIO_DB_PORT ?= 15432
+K8S_FORWARD_SCRIPT := $(subst /c/,C:/,$(subst /mnt/c/,C:/,$(ROOT_DIR)))/scripts/k8s-forward-all.ps1
 
 .PHONY: k8s-build
 k8s-build:
-	docker build -t "$(RADIO_IMAGE)" -f docker/app/Dockerfile .
+	$(DOCKER) build -t "$(RADIO_IMAGE)" -f docker/app/Dockerfile .
 
 .PHONY: k8s-save
 k8s-save:
-	$(PY) -c "from pathlib import Path; Path(r'$(RADIO_IMAGE_TAR)').parent.mkdir(parents=True, exist_ok=True)"
-	docker save "$(RADIO_IMAGE)" -o "$(RADIO_IMAGE_TAR)"
+	mkdir -p "$(dir $(RADIO_IMAGE_TAR))"
+	$(DOCKER) save "$(RADIO_IMAGE)" -o "$(RADIO_IMAGE_TAR_WIN)"
 
 .PHONY: k8s-import
 k8s-import:
 ifeq ($(OS),Windows_NT)
-	powershell -NoProfile -ExecutionPolicy Bypass -File "$(MAKEFILES_DIR)/k8s-import-image.ps1" -ImageTar "$(RADIO_IMAGE_TAR)" -Kubectl "$(KUBECTL)"
+	powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(K8S_WIN_ROOT)/makefiles/k8s-import-image.ps1" -ImageTar "$(RADIO_IMAGE_TAR_WIN)" -Kubectl "$(KUBECTL)"
 else
 	sudo k3s ctr images import "$(RADIO_IMAGE_TAR)"
 endif
@@ -51,18 +65,26 @@ k8s-deploy:
 	$(KUBECTL) -n "$(K8S_NAMESPACE)" rollout status deployment/"$(K8S_DEPLOYMENT)" --timeout=300s
 
 .PHONY: k8s-local-release
-k8s-local-release:
-	$(MAKE) -C "$(ROOT_DIR)" k8s-build
-	$(MAKE) -C "$(ROOT_DIR)" k8s-save
-	$(MAKE) -C "$(ROOT_DIR)" k8s-import
-	$(MAKE) -C "$(ROOT_DIR)" k8s-deploy
+k8s-local-release: k8s-build k8s-save k8s-import k8s-deploy
+
+.PHONY: local
+local: k8s-local-release
+ifeq ($(OS),Windows_NT)
+	powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(K8S_FORWARD_SCRIPT)" -Namespace "$(K8S_NAMESPACE)" -Deployment "$(K8S_DEPLOYMENT)" -HttpPort $(RADIO_HTTP_PORT) -ApiPort $(RADIO_API_PORT) -DbPort $(RADIO_DB_PORT)
+else
+	@echo "HTTP/player/admin/API/HLS: http://127.0.0.1:$(RADIO_HTTP_PORT)"
+	@trap 'kill 0' INT TERM EXIT; \
+	$(KUBECTL) -n "$(K8S_NAMESPACE)" port-forward svc/radio "$(RADIO_HTTP_PORT):80" & \
+	$(KUBECTL) -n "$(K8S_NAMESPACE)" port-forward deployment/"$(K8S_DEPLOYMENT)" "$(RADIO_API_PORT):8000" & \
+	wait
+endif
 
 .PHONY: k8s-smoke
 k8s-smoke: k8s-smoke-web
 
 .PHONY: k8s-smoke-web
 k8s-smoke-web:
-	$(KUBECTL) -n "$(K8S_NAMESPACE)" exec deploy/"$(K8S_DEPLOYMENT)" -c nginx -- sh -ec 'wget -qO- http://127.0.0.1:8080/player | grep -q "data-radio-app=\"player\""; wget -qO- http://127.0.0.1:8080/admin | grep -q "data-radio-app=\"admin\""; wget -qO- http://127.0.0.1:8080/api/current | grep -q "now_playing"; wget -qO- http://127.0.0.1:8080/manifest.webmanifest | grep -q "start_url"; wget -qO- http://127.0.0.1:8080/sw.js | grep -q "/hls/"; echo "k8s web smoke OK"'
+	$(KUBECTL) -n "$(K8S_NAMESPACE)" exec deploy/"$(K8S_DEPLOYMENT)" -c nginx -- sh -ec 'wget -qO- http://127.0.0.1:8080/health | grep -q "ok"; wget -qO- http://127.0.0.1:8080/api/health | grep -q "youtube"; wget -qO- http://127.0.0.1:8080/api/current | grep -q "now_playing"; wget -qO- http://127.0.0.1:8080/player | grep -q "data-radio-app=\"player\""; wget -qO- http://127.0.0.1:8080/admin | grep -q "data-radio-app=\"admin\""; wget -qO- http://127.0.0.1:8080/manifest.webmanifest | grep -q "start_url"; wget -qO- http://127.0.0.1:8080/sw.js | grep -q "/hls/"; wget -qO- http://127.0.0.1:8080/hls/mp4/playlist.m3u8 | grep -q "#EXT-X-STREAM-INF"; echo "k8s web/api/hls smoke OK"'
 
 .PHONY: k8s-status
 k8s-status:
@@ -96,7 +118,7 @@ k8s-forward-db:
 .PHONY: k8s-forward-all
 k8s-forward-all:
 ifeq ($(OS),Windows_NT)
-	powershell -NoProfile -ExecutionPolicy Bypass -Command "\$$ErrorActionPreference = 'Stop'; \$$jobs = @(Start-Job -ScriptBlock { $(KUBECTL) -n '$(K8S_NAMESPACE)' port-forward svc/radio '$(RADIO_HTTP_PORT):80' }; Start-Job -ScriptBlock { $(KUBECTL) -n '$(K8S_NAMESPACE)' port-forward deployment/'$(K8S_DEPLOYMENT)' '$(RADIO_API_PORT):8000' }; Start-Job -ScriptBlock { $(KUBECTL) -n '$(K8S_NAMESPACE)' port-forward svc/postgres '$(RADIO_DB_PORT):5432' }); Write-Host 'HTTP/player/admin/API/HLS: http://127.0.0.1:$(RADIO_HTTP_PORT)'; Write-Host 'Direct FastAPI: http://127.0.0.1:$(RADIO_API_PORT)'; Write-Host 'PostgreSQL: 127.0.0.1:$(RADIO_DB_PORT)'; try { Receive-Job -Job \$$jobs -Wait } finally { Stop-Job -Job \$$jobs -ErrorAction SilentlyContinue; Remove-Job -Job \$$jobs -Force -ErrorAction SilentlyContinue }"
+	powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(K8S_FORWARD_SCRIPT)" -Namespace "$(K8S_NAMESPACE)" -Deployment "$(K8S_DEPLOYMENT)" -HttpPort $(RADIO_HTTP_PORT) -ApiPort $(RADIO_API_PORT) -DbPort $(RADIO_DB_PORT)
 else
 	@echo "HTTP/player/admin/API/HLS: http://127.0.0.1:$(RADIO_HTTP_PORT)"
 	@echo "Direct FastAPI: http://127.0.0.1:$(RADIO_API_PORT)"

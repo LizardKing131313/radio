@@ -16,8 +16,8 @@ paths:
 hls:
   # Mirrors ffmpeg flags
   hls_time: 2
-  hls_list_size: 6
-  hls_delete_threshold: 8
+  hls_list_size: 12
+  hls_delete_threshold: 16
   bitrates: [ 64, 96, 128 ]
 
 search:

@@ -6,9 +6,17 @@ from pathlib import Path as FsPath
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
+from pydantic import BaseModel
 
-from manager.api.dependencies import DatabaseDep, require_admin_token
+from manager.api.dependencies import (
+    ADMIN_SESSION_COOKIE,
+    ADMIN_SESSION_MAX_AGE,
+    DatabaseDep,
+    check_admin_credentials,
+    make_admin_session,
+    require_admin_session,
+)
 from manager.api.schemas import EnqueueRequest, OfferAcceptRequest, OfferRequest
 from manager.api.serializers import queue_entry
 from manager.config import AppConfig, get_settings
@@ -21,6 +29,40 @@ from manager.track_queue.models import Track
 from manager.track_queue.repo import OffersRepo, QueueRepo, TracksRepo
 
 router = APIRouter()
+
+
+class AdminLoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@router.post("/auth/login")
+def admin_login(payload: AdminLoginRequest) -> JSONResponse:
+    if not check_admin_credentials(payload.username, payload.password):
+        raise HTTPException(status_code=401, detail="invalid credentials")
+    response = JSONResponse({"status": "ok"})
+    response.set_cookie(
+        ADMIN_SESSION_COOKIE,
+        make_admin_session(payload.username),
+        max_age=ADMIN_SESSION_MAX_AGE,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path="/",
+    )
+    return response
+
+
+@router.get("/auth/me", dependencies=[Depends(require_admin_session)])
+def admin_me() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@router.post("/auth/logout")
+def admin_logout() -> JSONResponse:
+    response = JSONResponse({"status": "ok"})
+    response.delete_cookie(ADMIN_SESSION_COOKIE, path="/")
+    return response
 
 
 @router.get("/health")
@@ -43,13 +85,17 @@ def current(database: DatabaseDep) -> dict[str, object | None]:
     }
 
 
-@router.get("/metrics")
+@router.get("/metrics", dependencies=[Depends(require_admin_session)])
 def metrics(database: DatabaseDep) -> dict[str, object]:
     settings = get_settings()
     return runtime_metrics(database, settings)
 
 
-@router.get("/metrics/prometheus", response_class=PlainTextResponse)
+@router.get(
+    "/metrics/prometheus",
+    response_class=PlainTextResponse,
+    dependencies=[Depends(require_admin_session)],
+)
 def metrics_prometheus(database: DatabaseDep) -> PlainTextResponse:
     settings = get_settings()
     text = prometheus_text(runtime_metrics(database, settings))
@@ -124,7 +170,7 @@ def prometheus_label(value: str) -> str:
     return value.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
 
 
-@router.get("/queue")
+@router.get("/queue", dependencies=[Depends(require_admin_session)])
 def queue(
     database: DatabaseDep,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
@@ -133,7 +179,7 @@ def queue(
     return {"items": [queue_entry(item) for item in items]}
 
 
-@router.get("/tracks")
+@router.get("/tracks", dependencies=[Depends(require_admin_session)])
 def tracks(
     database: DatabaseDep,
     q: Annotated[str | None, Query(max_length=200)] = None,
@@ -151,7 +197,7 @@ def tracks(
     return {"items": [dict(track.to_dict()) for track in items], "stats": stats}
 
 
-@router.post("/tracks/{track_id}/ban", dependencies=[Depends(require_admin_token)])
+@router.post("/tracks/{track_id}/ban", dependencies=[Depends(require_admin_session)])
 def track_ban(track_id: int, database: DatabaseDep) -> dict[str, object]:
     repo = TracksRepo(database)
     track = get_track_or_404(repo, track_id)
@@ -159,14 +205,14 @@ def track_ban(track_id: int, database: DatabaseDep) -> dict[str, object]:
     return {"status": "banned", "track": dict(repo.ban(track_id).to_dict())}
 
 
-@router.post("/tracks/{track_id}/restore", dependencies=[Depends(require_admin_token)])
+@router.post("/tracks/{track_id}/restore", dependencies=[Depends(require_admin_session)])
 def track_restore(track_id: int, database: DatabaseDep) -> dict[str, object]:
     repo = TracksRepo(database)
     get_track_or_404(repo, track_id)
     return {"status": "restored", "track": dict(repo.restore(track_id).to_dict())}
 
 
-@router.post("/tracks/{track_id}/retry", dependencies=[Depends(require_admin_token)])
+@router.post("/tracks/{track_id}/retry", dependencies=[Depends(require_admin_session)])
 def track_retry(track_id: int, database: DatabaseDep) -> dict[str, object]:
     repo = TracksRepo(database)
     track = get_track_or_404(repo, track_id)
@@ -174,7 +220,7 @@ def track_retry(track_id: int, database: DatabaseDep) -> dict[str, object]:
     return {"status": "scheduled", "track": dict(repo.retry_download(track_id).to_dict())}
 
 
-@router.post("/tracks/{track_id}/play-now", dependencies=[Depends(require_admin_token)])
+@router.post("/tracks/{track_id}/play-now", dependencies=[Depends(require_admin_session)])
 def track_play_now(track_id: int, database: DatabaseDep) -> dict[str, object]:
     tracks_repo = TracksRepo(database)
     queue_repo = QueueRepo(database)
@@ -203,7 +249,7 @@ def track_play_now(track_id: int, database: DatabaseDep) -> dict[str, object]:
     }
 
 
-@router.post("/queue/append", dependencies=[Depends(require_admin_token)])
+@router.post("/queue/append", dependencies=[Depends(require_admin_session)])
 def queue_append(
     payload: EnqueueRequest,
     database: DatabaseDep,
@@ -216,7 +262,7 @@ def queue_append(
     return {"queue_id": queue_id}
 
 
-@router.post("/queue/append/admin", dependencies=[Depends(require_admin_token)])
+@router.post("/queue/append/admin", dependencies=[Depends(require_admin_session)])
 def queue_append_admin(
     payload: EnqueueRequest,
     database: DatabaseDep,
@@ -229,7 +275,7 @@ def queue_append_admin(
     return {"queue_id": queue_id}
 
 
-@router.post("/queue/skip", dependencies=[Depends(require_admin_token)])
+@router.post("/queue/skip", dependencies=[Depends(require_admin_session)])
 def queue_skip(database: DatabaseDep) -> dict[str, object]:
     queue_repo = QueueRepo(database)
     settings = get_settings()
@@ -260,7 +306,7 @@ def queue_skip(database: DatabaseDep) -> dict[str, object]:
     return {"status": "skipped", "queue_items": skipped_queue_items}
 
 
-@router.get("/offers")
+@router.get("/offers", dependencies=[Depends(require_admin_session)])
 def offers(
     database: DatabaseDep,
     status_filter: Annotated[str | None, Query(alias="status")] = None,
@@ -283,7 +329,7 @@ def offers_add(
     return {"offer_id": offer_id}
 
 
-@router.get("/offers/{offer_id}")
+@router.get("/offers/{offer_id}", dependencies=[Depends(require_admin_session)])
 def offer(offer_id: int, database: DatabaseDep) -> dict[str, object]:
     try:
         item = OffersRepo(database).get(offer_id)
@@ -295,7 +341,7 @@ def offer(offer_id: int, database: DatabaseDep) -> dict[str, object]:
     return dict(item.to_dict())
 
 
-@router.post("/offers/{offer_id}/accept", dependencies=[Depends(require_admin_token)])
+@router.post("/offers/{offer_id}/accept", dependencies=[Depends(require_admin_session)])
 def offer_accept(
     offer_id: int,
     payload: OfferAcceptRequest,
@@ -305,7 +351,7 @@ def offer_accept(
     return {"status": "accepted"}
 
 
-@router.post("/offers/{offer_id}/cancel", dependencies=[Depends(require_admin_token)])
+@router.post("/offers/{offer_id}/cancel", dependencies=[Depends(require_admin_session)])
 def offer_cancel(
     offer_id: int,
     database: DatabaseDep,

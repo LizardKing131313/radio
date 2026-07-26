@@ -7,17 +7,16 @@ cd /mnt/c/work/radio
 cp ansible/inventory/hosts.example.yml ansible/inventory/hosts.local.yml
 ```
 
-В `hosts.local.yml` укажи IP VPS и `ansible_user: root`.
-Если реально надо снести существующего пользователя `radio` вместе с home, временно поставь
+В `hosts.local.yml` укажи IP VPS и `ansible_user: root`. Если реально надо снести существующего пользователя `radio`
+вместе с home, временно поставь
 `radio_recreate_user: true` в inventory/group_vars.
 
 Если используется второй российский VPS как публичный edge-proxy, добавь его в группу
-`vps_edge`. Имя хоста внутри inventory (`radio-vps`, `ru-edge-vps`) - только локальный
-алиас Ansible, на DNS оно не влияет.
+`vps_edge`. Имя хоста внутри inventory (`radio-vps`, `ru-edge-vps`) - только локальный алиас Ansible, на DNS оно не
+влияет.
 
-Перед запуском нужны YouTube API key, домен с A/AAAA-записью на VPS, email для Let's Encrypt
-и публичный SSH-ключ в `radio_authorized_key_files` или `radio_authorized_keys`.
-Секреты удобнее держать в локальном ignored-файле:
+Перед запуском нужны YouTube API key, домен с A/AAAA-записью на VPS, email для Let's Encrypt и публичный SSH-ключ в
+`radio_authorized_key_files` или `radio_authorized_keys`. Секреты удобнее держать в локальном ignored-файле:
 
 ```bash
 cp ansible/local-vars.example.yml ansible/local-vars.yml
@@ -27,22 +26,20 @@ cp ansible/local-vars.example.yml ansible/local-vars.yml
 
 ```yaml
 radio_tls_email: admin@example.com
-radio_youtube_api_key: ...
 ```
 
 `RADIO_DOMAIN` и edge-домены можно задавать в inventory. В активном
 `ansible/inventory/hosts.yml` origin сейчас `govnovoz-fm.fun`, edge proxy -
 `ru.govnovoz-fm.fun`.
 
-Для схемы с российским edge нужен отдельный публичный домен edge, который смотрит на
-российский VPS. Origin-домен должен смотреть на иностранный VPS, потому что по нему
-работают ingress-nginx и cert-manager внутри k3s:
+Для схемы с российским edge нужен отдельный публичный домен edge, который смотрит на российский VPS. Origin-домен должен
+смотреть на иностранный VPS, потому что по нему работают ingress-nginx и cert-manager внутри k3s:
 
 Обычно для edge уже достаточно inventory-переменных `radio_edge_domain`,
 `radio_edge_origin_host` и `radio_edge_origin_url`.
 
-`RADIO_POSTGRES_PASSWORD` и `RADIO_ADMIN_TOKEN` можно не задавать. Тогда Ansible создаст их локально в
-`ansible/.generated/`, эта директория игнорируется git.
+Все runtime-секреты задаются вручную в `deploy/k8s/secret.yaml`. Ansible не генерирует и не собирает секреты из
+env/local-vars, а только копирует этот файл на VPS.
 
 Запуск из WSL:
 
@@ -62,7 +59,7 @@ make -f Makefile -f makefiles/ansible.mk ansible.run INVENTORY=ansible/inventory
 - открывает SSH, `80/tcp` и `443/tcp`;
 - копирует проект в `/opt/radio/app`;
 - собирает `radio-manager:latest` на VPS и импортирует образ в k3s;
-- генерирует `deploy/k8s/secret.yaml`, `issuer.yaml` и `ingress.yaml` на VPS;
+- копирует вручную заполненный `deploy/k8s/secret.yaml` на VPS;
 - запускает `kubectl apply -k deploy`, Alembic и rollout.
 
 Для группы `vps_edge` playbook отдельно:

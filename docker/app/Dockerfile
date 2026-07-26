@@ -27,10 +27,14 @@ COPY alembic.ini ./
 COPY alembic ./alembic
 COPY manager ./manager
 COPY scripts ./scripts
+COPY deploy/k8s/config/jingles /opt/radio/jingles
 COPY --from=frontend-build /app/frontend/dist /opt/radio/www/html
+COPY --from=frontend-build /usr/local/bin/node /usr/local/bin/node
 
 RUN python -m pip install --no-cache-dir -U pip setuptools wheel \
     && python -m pip install --no-cache-dir . \
+    && node --version \
+    && yt-dlp --version \
     && mkdir -p logs \
     && chown -R 10001:10001 logs
 

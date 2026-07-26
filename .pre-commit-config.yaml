@@ -43,6 +43,8 @@ repos:
       - id: trailing-whitespace
       - id: check-merge-conflict
       - id: check-added-large-files
+        # Bundled radio jingles are intentionally larger than the generic 500 KB limit.
+        exclude: ^deploy/k8s/config/jingles/.*\.mp3$
       - id: check-yaml
         args: [ "--allow-multiple-documents" ]
       - id: check-toml

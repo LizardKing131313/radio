@@ -35,8 +35,10 @@ class HLSSettings(BaseModel):
     """Настройки HLS названы почти как ffmpeg-флаги, чтобы проще сверять CLI."""
 
     hls_time: int = Field(default=2)
-    hls_list_size: int = Field(default=6)
-    hls_delete_threshold: int = Field(default=8)
+    # Keep a wider live window so an edge proxy has time to fetch segments
+    # before FFmpeg removes them from the origin filesystem.
+    hls_list_size: int = Field(default=12)
+    hls_delete_threshold: int = Field(default=16)
     bitrates: list[int] = Field(default_factory=lambda: [64, 96, 128])
 
 
@@ -87,7 +89,8 @@ class Secrets(BaseModel):
     """
 
     youtube_api_key_raw: SecretStr | None = Field(default=None)
-    admin_token_raw: SecretStr | None = Field(default=None)
+    admin_username_raw: str | None = Field(default=None)
+    admin_password_raw: SecretStr | None = Field(default=None)
 
     @property
     def youtube_api_key(self) -> SecretStr:
@@ -98,10 +101,16 @@ class Secrets(BaseModel):
         return self.youtube_api_key_raw
 
     @property
-    def admin_token(self) -> SecretStr:
-        if self.admin_token_raw is None:
-            raise MissingConfigError("Missing admin token. Set RADIO_ADMIN_TOKEN or ADMIN_TOKEN.")
-        return self.admin_token_raw
+    def admin_username(self) -> str:
+        return self.admin_username_raw or "admin"
+
+    @property
+    def admin_password(self) -> SecretStr:
+        if self.admin_password_raw is None:
+            raise MissingConfigError(
+                "Missing admin password. Set RADIO_ADMIN_PASSWORD or ADMIN_PASSWORD."
+            )
+        return self.admin_password_raw
 
 
 class AppConfig(BaseSettings):
@@ -170,9 +179,13 @@ class AppConfig(BaseSettings):
         if api_key is not None:
             cfg.secrets.youtube_api_key_raw = SecretStr(api_key)
 
-        admin_token = _get_env("RADIO_ADMIN_TOKEN", "ADMIN_TOKEN")
-        if admin_token is not None:
-            cfg.secrets.admin_token_raw = SecretStr(admin_token)
+        admin_username = _get_env("RADIO_ADMIN_USERNAME", "ADMIN_USERNAME")
+        if admin_username is not None:
+            cfg.secrets.admin_username_raw = admin_username
+
+        admin_password = _get_env("RADIO_ADMIN_PASSWORD", "ADMIN_PASSWORD")
+        if admin_password is not None:
+            cfg.secrets.admin_password_raw = SecretStr(admin_password)
 
         database_dsn = _get_env("RADIO_DATABASE_DSN", "DATABASE_URL", "POSTGRES_DSN")
         if database_dsn is not None:

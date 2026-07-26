@@ -21,6 +21,7 @@ ACTIVATE := source $(VENV)/bin/activate
 AI := ANSIBLE_CONFIG="$(ANSIBLE_CFG)" ansible
 AIPB := ANSIBLE_CONFIG="$(ANSIBLE_CFG)" ansible-playbook
 AIG := ANSIBLE_CONFIG="$(ANSIBLE_CFG)" ansible-galaxy
+SSH_AGENT_SETUP := eval "$$(bash $(ROOT_DIR)/scripts/ensure-ssh-agent.sh)"
 
 # ===== HELP =====
 help-ansible: ## Показать хелп по целям Ansible
@@ -55,16 +56,20 @@ ansible.galaxy: ## Установить коллекции из ansible/requirem
 
 # ===== Проверки и запуск =====
 ansible.ping: ## ansible -m ping для всех хостов
-	@cd "$(ROOT_DIR)" && $(ACTIVATE); $(AI) -i "$(INVENTORY)" all -m ping
+	@cd "$(ROOT_DIR)" && $(ACTIVATE); $(SSH_AGENT_SETUP); $(AI) -i "$(INVENTORY)" all -m ping $(LIMIT)
 
 ansible.lint: ## ansible-lint для плейбуков/ролей
 	@cd "$(ROOT_DIR)" && $(ACTIVATE); ansible-lint -c "$(ANSIBLE_CFG)" || ansible-lint || true
 
 ansible.check: ## Прогон плейбука в --check (dry-run)
-	@cd "$(ROOT_DIR)" && $(ACTIVATE); $(AIPB) -i "$(INVENTORY)" "$(PLAYBOOK)" --check $(LIMIT) $(TAGS) $(EXTRA_VARS)
+	@cd "$(ROOT_DIR)" && $(ACTIVATE); $(SSH_AGENT_SETUP); $(AIPB) -i "$(INVENTORY)" "$(PLAYBOOK)" --check $(LIMIT) $(TAGS) $(EXTRA_VARS)
 
 ansible.run: ## Запуск плейбука (боевой)
-	@cd "$(ROOT_DIR)" && $(ACTIVATE); $(AIPB) -i "$(INVENTORY)" "$(PLAYBOOK)" $(LIMIT) $(TAGS) $(EXTRA_VARS)
+	@cd "$(ROOT_DIR)" && $(ACTIVATE); $(SSH_AGENT_SETUP); $(AIPB) -i "$(INVENTORY)" "$(PLAYBOOK)" $(LIMIT) $(TAGS) $(EXTRA_VARS)
+
+ansible.origin: INVENTORY=ansible/inventory/hosts.local.yml
+ansible.origin: LIMIT=--limit vps_root
+ansible.origin: ansible.run ## Деплой origin VPS с локальным inventory
 
 ansible.tags: ## Показать доступные теги плейбука
 	@cd "$(ROOT_DIR)" && $(ACTIVATE); $(AIPB) -i "$(INVENTORY)" "$(PLAYBOOK)" --list-tags

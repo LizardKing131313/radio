@@ -10,7 +10,8 @@ from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from manager.api.app import app, get_database, require_admin_token
+from manager.api.app import app, get_database, require_admin_session
+from manager.api.dependencies import check_admin_credentials
 from manager.config import AppConfig, get_settings
 from manager.track_queue.db import Database
 from manager.track_queue.models import Track
@@ -33,14 +34,14 @@ def api_context(
 ) -> Iterator[tuple[TestClient, Database]]:
     dsn = f"sqlite+pysqlite:///{tmp_path / 'api.db'}"
     monkeypatch.setenv("RADIO_DATABASE_DSN", dsn)
-    monkeypatch.setenv("RADIO_ADMIN_TOKEN", "secret-token")
+    monkeypatch.setenv("RADIO_ADMIN_PASSWORD", "secret-password")
     get_settings.cache_clear()
 
     cfg = AppConfig()
     cfg.paths.www_html = tmp_path / "www" / "html"
     cfg.paths.nowplaying_path = tmp_path / "runtime" / "nowplaying.txt"
     cfg.paths.nowplaying_path.parent.mkdir(parents=True, exist_ok=True)
-    cfg.secrets.admin_token_raw = SecretStr("secret-token")
+    cfg.secrets.admin_password_raw = SecretStr("secret-password")
     _write_web_build(cfg.paths.www_html)
     _patch_api_settings(monkeypatch, cfg)
 
@@ -49,7 +50,15 @@ def api_context(
 
     app.dependency_overrides[get_database] = lambda: database
     try:
-        with TestClient(app) as client:
+        # The production session cookie is Secure; use HTTPS so TestClient
+        # behaves like the browser and sends it on protected API requests.
+        with TestClient(app, base_url="https://testserver") as client:
+            assert (
+                client.post(
+                    "/auth/login", json={"username": "admin", "password": "secret-password"}
+                ).status_code
+                == 200
+            )
             yield client, database
     finally:
         app.dependency_overrides.clear()
@@ -199,13 +208,18 @@ def test_health_queue_current_and_admin_enqueue(api_context: tuple[TestClient, D
         },
         "queue": None,
     }
+    client.post("/auth/logout")
     assert client.post("/queue/append", json={"track_id": track_id}).status_code == 401
+    assert (
+        client.post(
+            "/auth/login", json={"username": "admin", "password": "secret-password"}
+        ).status_code
+        == 200
+    )
 
-    headers = {"Authorization": "Bearer secret-token"}
     append_response = client.post(
         "/queue/append",
         json={"track_id": track_id, "requested_by": "user", "note": "note"},
-        headers=headers,
     )
     assert append_response.status_code == 200
     queue_id = append_response.json()["queue_id"]
@@ -219,7 +233,6 @@ def test_health_queue_current_and_admin_enqueue(api_context: tuple[TestClient, D
     next_response = client.post(
         "/queue/append/admin",
         json={"track_id": track_id},
-        headers=headers,
     )
     assert next_response.status_code == 200
     assert next_response.json()["queue_id"] > queue_id
@@ -241,7 +254,6 @@ def test_health_queue_current_and_admin_enqueue(api_context: tuple[TestClient, D
 def test_offer_endpoints_and_admin_actions(api_context: tuple[TestClient, Database]) -> None:
     client, database = api_context
     track_id = TracksRepo(database).upsert("youtube0001", "Track", 120)
-    headers = {"Authorization": "Bearer secret-token"}
 
     add_response = client.post(
         "/offers/add",
@@ -257,13 +269,12 @@ def test_offer_endpoints_and_admin_actions(api_context: tuple[TestClient, Databa
     accept_response = client.post(
         f"/offers/{offer_id}/accept",
         json={"track_id": track_id},
-        headers=headers,
     )
     assert accept_response.json() == {"status": "accepted"}
     assert OffersRepo(database).get(offer_id).accepted_track_id == track_id
 
     cancelled_id = OffersRepo(database).add("https://youtu.be/y")
-    cancel_response = client.post(f"/offers/{cancelled_id}/cancel", headers=headers)
+    cancel_response = client.post(f"/offers/{cancelled_id}/cancel")
     assert cancel_response.json() == {"status": "cancelled"}
     assert OffersRepo(database).get(cancelled_id).status == "cancelled"
 
@@ -273,7 +284,6 @@ def test_queue_skip_endpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client, database = api_context
-    headers = {"Authorization": "Bearer secret-token"}
     track_id = TracksRepo(database).upsert("youtube0001", "Track", 120)
     queue = QueueRepo(database)
     queue_id = queue.enqueue(track_id)
@@ -306,26 +316,26 @@ def test_queue_skip_endpoint(
 
     monkeypatch.setattr(routes_module, "LiquidsoapTelnetClient", FakeTelnet)
 
-    response = client.post("/queue/skip", headers=headers)
+    response = client.post("/queue/skip")
     assert response.json() == {"status": "skipped", "queue_items": 1}
     assert calls == ["request-skip"]
 
     queued_id = queue.enqueue(track_id)
     queue.reserve_next()
     _write_queue_metadata(cfg, queue_id=None, track_id=None)
-    response = client.post("/queue/skip", headers=headers)
+    response = client.post("/queue/skip")
     assert response.json() == {"status": "skipped", "queue_items": 0}
     assert calls == ["request-skip", "output-skip", "library-skip"]
     assert any(item.id == queued_id for item, _track in QueueRepo(database).list_visible())
 
     queue.mark_playing(queued_id)
     _write_queue_metadata(cfg, queue_id=queued_id, track_id=track_id, queue_kind="urgent")
-    response = client.post("/queue/skip", headers=headers)
+    response = client.post("/queue/skip")
     assert response.json() == {"status": "skipped", "queue_items": 1}
     assert calls == ["request-skip", "output-skip", "library-skip", "play-now-skip"]
 
     _write_queue_metadata(cfg, queue_id=None, track_id=None)
-    response = client.post("/queue/skip", headers=headers)
+    response = client.post("/queue/skip")
     assert response.json() == {"status": "skipped", "queue_items": 0}
     assert calls == [
         "request-skip",
@@ -358,7 +368,7 @@ def test_queue_skip_endpoint_liquidsoap_error(
     routes_module = import_module("manager.api.routes")
     monkeypatch.setattr(routes_module, "LiquidsoapTelnetClient", BrokenTelnet)
 
-    response = client.post("/queue/skip", headers={"Authorization": "Bearer secret-token"})
+    response = client.post("/queue/skip")
     assert response.status_code == 503
 
 
@@ -382,7 +392,7 @@ def test_queue_skip_skips_active_request_when_metadata_has_track_without_queue_i
 
     monkeypatch.setattr(routes_module, "LiquidsoapTelnetClient", FakeTelnet)
 
-    response = client.post("/queue/skip", headers={"Authorization": "Bearer secret-token"})
+    response = client.post("/queue/skip")
 
     assert response.json() == {"status": "skipped", "queue_items": 1}
     assert calls == ["request-skip"]
@@ -412,7 +422,7 @@ def test_queue_skip_library_fallback_marks_playing_item_skipped(
 
     monkeypatch.setattr(routes_module, "LiquidsoapTelnetClient", FakeTelnet)
 
-    response = client.post("/queue/skip", headers={"Authorization": "Bearer secret-token"})
+    response = client.post("/queue/skip")
 
     assert response.json() == {"status": "skipped", "queue_items": 1}
     assert calls == ["output-skip", "library-skip"]
@@ -469,7 +479,6 @@ def test_track_play_now_pushes_selected_track_as_queue_item(
 
     response = client.post(
         f"/tracks/{selected_track_id}/play-now",
-        headers={"Authorization": "Bearer secret-token"},
     )
 
     body = response.json()
@@ -543,7 +552,6 @@ def test_track_play_now_replaces_current_request_without_falling_back_to_library
 
     response = client.post(
         f"/tracks/{selected_track_id}/play-now",
-        headers={"Authorization": "Bearer secret-token"},
     )
 
     body = response.json()
@@ -567,7 +575,6 @@ def test_track_play_now_rejects_unplayable_tracks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client, database = api_context
-    headers = {"Authorization": "Bearer secret-token"}
     tracks = TracksRepo(database)
     audio = tmp_path / "track.opus"
     audio.write_text("audio", encoding="utf-8")
@@ -588,10 +595,10 @@ def test_track_play_now_rejects_unplayable_tracks(
     deleted_id = tracks.upsert("youtube0004", "Deleted", 120, audio_path=str(audio))
     tracks.ban(deleted_id)
 
-    assert client.post(f"/tracks/{deleted_id}/play-now", headers=headers).status_code == 409
-    assert client.post(f"/tracks/{inactive_id}/play-now", headers=headers).status_code == 409
-    assert client.post(f"/tracks/{no_audio_id}/play-now", headers=headers).status_code == 409
-    assert client.post(f"/tracks/{missing_file_id}/play-now", headers=headers).status_code == 409
+    assert client.post(f"/tracks/{deleted_id}/play-now").status_code == 409
+    assert client.post(f"/tracks/{inactive_id}/play-now").status_code == 409
+    assert client.post(f"/tracks/{no_audio_id}/play-now").status_code == 409
+    assert client.post(f"/tracks/{missing_file_id}/play-now").status_code == 409
 
     class BrokenTelnet:
         def flush_request_queue(self) -> str:
@@ -615,7 +622,7 @@ def test_track_play_now_rejects_unplayable_tracks(
     monkeypatch.setattr(routes_module, "LiquidsoapTelnetClient", BrokenTelnet)
     playable_id = tracks.upsert("youtube0005", "Playable", 120, audio_path=str(audio))
 
-    assert client.post(f"/tracks/{playable_id}/play-now", headers=headers).status_code == 503
+    assert client.post(f"/tracks/{playable_id}/play-now").status_code == 503
 
 
 def test_track_admin_page_and_actions(
@@ -631,7 +638,7 @@ def test_track_admin_page_and_actions(
     cfg.paths.cache_cold.mkdir()
     cfg.paths.cache_hot.mkdir()
     _write_web_build(cfg.paths.www_html)
-    cfg.secrets.admin_token_raw = SecretStr("secret-token")
+    cfg.secrets.admin_password_raw = SecretStr("secret-password")
     api_module = import_module("manager.api.app")
     _patch_api_settings(monkeypatch, cfg)
 
@@ -654,9 +661,15 @@ def test_track_admin_page_and_actions(
     assert tracks_response["stats"]["downloaded"] == 1
     assert client.get("/tracks?status=broken").status_code == 400
 
+    client.post("/auth/logout")
     assert client.post(f"/tracks/{track_id}/retry").status_code == 401
-    headers = {"Authorization": "Bearer secret-token"}
-    retry = client.post(f"/tracks/{track_id}/retry", headers=headers).json()
+    assert (
+        client.post(
+            "/auth/login", json={"username": "admin", "password": "secret-password"}
+        ).status_code
+        == 200
+    )
+    retry = client.post(f"/tracks/{track_id}/retry").json()
     assert retry["status"] == "scheduled"
     assert retry["track"]["audio_path"] is None
     assert not cold.exists()
@@ -665,16 +678,16 @@ def test_track_admin_page_and_actions(
     cold.write_text("audio", encoding="utf-8")
     hot.write_text("audio", encoding="utf-8")
     tracks.update_track_audio(track_id=track_id, audio_path=str(cold))
-    ban = client.post(f"/tracks/{track_id}/ban", headers=headers).json()
+    ban = client.post(f"/tracks/{track_id}/ban").json()
     assert ban["status"] == "banned"
     assert ban["track"]["deleted_at"] is not None
     assert not cold.exists()
     assert not hot.exists()
 
-    restore = client.post(f"/tracks/{track_id}/restore", headers=headers).json()
+    restore = client.post(f"/tracks/{track_id}/restore").json()
     assert restore["status"] == "restored"
     assert restore["track"]["deleted_at"] is None
-    assert client.post("/tracks/404/restore", headers=headers).status_code == 404
+    assert client.post("/tracks/404/restore").status_code == 404
 
     # Прямо закрываем ветки helper-ов удаления: путь вне cache игнорируется,
     # track без audio_path не добавляет лишний candidate.
@@ -704,13 +717,27 @@ def test_track_admin_page_and_actions(
     assert outside.exists()
 
 
-def test_admin_token_missing_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("RADIO_ADMIN_TOKEN", raising=False)
-    monkeypatch.delenv("ADMIN_TOKEN", raising=False)
+def test_admin_session_missing_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RADIO_ADMIN_PASSWORD", raising=False)
+    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
     get_settings.cache_clear()
 
-    with pytest.raises(HTTPException) as exception_info:
-        require_admin_token("Bearer whatever")
-
-    assert exception_info.value.status_code == 503
+    request = Request({"type": "http", "headers": [], "method": "GET", "path": "/"})
+    with pytest.raises(HTTPException):
+        require_admin_session(request)
+    with pytest.raises(HTTPException) as error:
+        check_admin_credentials("admin", "secret-password")
+    assert error.value.status_code == 503
     get_settings.cache_clear()
+
+
+def test_admin_auth_success_and_invalid_credentials(
+    api_context: tuple[TestClient, Database],
+) -> None:
+    client, _database = api_context
+    assert client.get("/auth/me").json() == {"status": "ok"}
+    invalid = client.post(
+        "/auth/login",
+        json={"username": "admin", "password": "wrong-password"},
+    )
+    assert invalid.status_code == 401

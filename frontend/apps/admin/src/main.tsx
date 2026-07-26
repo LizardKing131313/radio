@@ -1,7 +1,6 @@
 import {
   defaultApiBase,
   type MetricsResponse,
-  MissingAdminTokenError,
   type Offer,
   type QueueEntry,
   RadioApiClient,
@@ -15,20 +14,12 @@ import {useCallback, useEffect, useState} from "preact/hooks";
 import "../../shared/styles.css";
 import {performTrackAction, skipCurrent, type TrackAction} from "./actions";
 
-const TOKEN_KEY = "radioAdminToken";
-
-function readStoredToken(): string {
-  return localStorage.getItem(TOKEN_KEY) ?? sessionStorage.getItem(TOKEN_KEY) ?? "";
-}
-
-const api = new RadioApiClient({
-  baseUrl: defaultApiBase(),
-  tokenProvider: readStoredToken
-});
+const api = new RadioApiClient({baseUrl: defaultApiBase()});
 
 function App() {
-  const [token, setToken] = useState(readStoredToken());
-  const [remember, setRemember] = useState(Boolean(localStorage.getItem(TOKEN_KEY)));
+  const [authenticated, setAuthenticated] = useState(false);
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("downloaded");
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null);
@@ -48,17 +39,16 @@ function App() {
     .map(([key, value]) => `${key}: ${String(value)}`)
     .join(", ");
 
-  function saveToken() {
-    localStorage.removeItem(TOKEN_KEY);
-    sessionStorage.removeItem(TOKEN_KEY);
-    if (token.trim()) {
-      if (remember) {
-        localStorage.setItem(TOKEN_KEY, token.trim());
-      } else {
-        sessionStorage.setItem(TOKEN_KEY, token.trim());
-      }
+  async function login() {
+    setError(null);
+    try {
+      await api.login(username, password);
+      setPassword("");
+      setAuthenticated(true);
+      await loadAll();
+    } catch (caught) {
+      setError("Неверное имя пользователя или пароль");
     }
-    setNotice("Token сохранен");
   }
 
   const loadAll = useCallback(async () => {
@@ -96,8 +86,54 @@ function App() {
   );
 
   useEffect(() => {
-    void loadAll();
-  }, [loadAll]);
+    void api
+      .session()
+      .then(() => setAuthenticated(true))
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (authenticated) void loadAll();
+  }, [authenticated, loadAll]);
+
+  if (!authenticated) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#102225] px-4 text-[#f5efe0]">
+        <form
+          className="grid w-full max-w-md gap-4 rounded-[1.75rem] bg-[#e9c46a] p-6 text-[#102225] shadow-xl"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void login();
+          }}
+        >
+          <p className="text-xs font-black tracking-[0.35em] uppercase">radio control</p>
+          <h1 className="text-4xl font-black tracking-[-0.07em]">Вход в админку</h1>
+          <input
+            value={username}
+            onInput={(event) => setUsername(event.currentTarget.value)}
+            placeholder="Имя пользователя"
+            autoComplete="username"
+            className="rounded-2xl border-2 border-[#102225] bg-white px-4 py-3"
+          />
+          <input
+            type="password"
+            value={password}
+            onInput={(event) => setPassword(event.currentTarget.value)}
+            placeholder="Пароль"
+            autoComplete="current-password"
+            className="rounded-2xl border-2 border-[#102225] bg-white px-4 py-3"
+          />
+          <button
+            type="submit"
+            className="rounded-2xl bg-[#102225] px-5 py-3 font-black text-[#f5efe0]"
+          >
+            Войти
+          </button>
+          {error ? <Message tone="error" text={error}/> : null}
+        </form>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-[#102225] text-[#f5efe0]">
@@ -109,30 +145,14 @@ function App() {
             <h1 className="mt-1 text-4xl font-black tracking-[-0.07em] sm:text-5xl">Пульт эфира</h1>
             <p className="mt-3 text-sm font-bold">Сейчас: {currentTitle}</p>
           </div>
-          <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_auto] lg:min-w-[460px]">
-            <input
-              type="password"
-              value={token}
-              onInput={(event) => setToken(event.currentTarget.value)}
-              placeholder="Admin token"
-              autoComplete="current-password"
-              className="rounded-2xl border-2 border-[#102225] bg-white px-4 py-3 text-[#102225]"
-            />
+          <div className="grid gap-2 lg:min-w-[180px]">
             <button
               type="button"
-              onClick={saveToken}
+              onClick={() => void api.logout().then(() => setAuthenticated(false))}
               className="rounded-2xl bg-[#102225] px-5 py-3 font-black text-[#f5efe0]"
             >
-              Сохранить
+              Выйти
             </button>
-            <label className="flex items-center gap-2 text-sm font-bold">
-              <input
-                type="checkbox"
-                checked={remember}
-                onChange={(event) => setRemember(event.currentTarget.checked)}
-              />
-              Запомнить на устройстве
-            </label>
           </div>
         </header>
 
@@ -276,7 +296,7 @@ function TrackList({
             <Action
               disabled={busy}
               onClick={() => onAction("enqueue", track.id)}
-              label="Следующим"
+              label="В очередь"
             />
             <Action
               disabled={busy}
@@ -383,9 +403,6 @@ function Message({tone, text}: { tone: "error" | "notice"; text: string }) {
 }
 
 function errorMessage(error: unknown): string {
-  if (error instanceof MissingAdminTokenError) {
-    return "Введите admin token";
-  }
   return error instanceof Error ? error.message : String(error);
 }
 

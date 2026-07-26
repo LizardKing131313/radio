@@ -17,6 +17,9 @@ metadata:
   name: radio
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
+  progressDeadlineSeconds: 600
   selector:
     matchLabels:
       app.kubernetes.io/name: radio
@@ -25,6 +28,7 @@ spec:
       labels:
         app.kubernetes.io/name: radio
     spec:
+      terminationGracePeriodSeconds: 30
       securityContext:
         fsGroup: 10001
         fsGroupChangePolicy: OnRootMismatch

@@ -42,13 +42,7 @@ radio_edge_origin_host: >-
 radio_edge_origin_url: "{{ lookup('ansible.builtin.env', 'RADIO_EDGE_ORIGIN_URL') }}"
 radio_edge_hls_cache_size: 2g
 
-# Secrets: YouTube key is required. Password/token are generated into
-# ansible/.generated/ if env vars are not provided.
-radio_postgres_db: radio
-radio_postgres_user: radio
-radio_postgres_password: "{{ lookup('ansible.builtin.env', 'RADIO_POSTGRES_PASSWORD') }}"
-radio_youtube_api_key: "{{ lookup('ansible.builtin.env', 'RADIO_YOUTUBE_API_KEY') }}"
-radio_admin_token: "{{ lookup('ansible.builtin.env', 'RADIO_ADMIN_TOKEN') }}"
+# Runtime secrets are managed manually in deploy/k8s/secret.yaml.
 
 # Minimal firewall: SSH + public HTTP/HTTPS for origin ingress-nginx or edge nginx.
 ssh_port: 22

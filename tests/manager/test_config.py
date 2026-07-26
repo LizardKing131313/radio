@@ -16,8 +16,10 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "RADIO_DATABASE_DSN",
         "DATABASE_URL",
         "POSTGRES_DSN",
-        "RADIO_ADMIN_TOKEN",
-        "ADMIN_TOKEN",
+        "RADIO_ADMIN_PASSWORD",
+        "ADMIN_PASSWORD",
+        "RADIO_ADMIN_USERNAME",
+        "ADMIN_USERNAME",
     ]
     for k in keys:
         monkeypatch.delenv(k, raising=False)
@@ -87,10 +89,16 @@ def test_api_key_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cfg.secrets.youtube_api_key.get_secret_value() == "api-key"
 
 
-def test_admin_token_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ADMIN_TOKEN", "admin-token")
+def test_admin_password_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ADMIN_PASSWORD", "admin-password")
     cfg = AppConfig.from_yaml()
-    assert cfg.secrets.admin_token.get_secret_value() == "admin-token"
+    assert cfg.secrets.admin_password.get_secret_value() == "admin-password"
+
+
+def test_admin_username_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RADIO_ADMIN_USERNAME", "operator")
+    cfg = AppConfig.from_yaml()
+    assert cfg.secrets.admin_username == "operator"
 
 
 def test_database_dsn_from_env(monkeypatch: pytest.MonkeyPatch) -> None:

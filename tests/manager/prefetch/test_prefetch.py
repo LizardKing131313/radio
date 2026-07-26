@@ -160,6 +160,43 @@ async def test_download_uses_staging_outside_liquidsoap_playlists(
     assert _tmp_names(worker._staging_dir()) == set()
 
 
+@pytest.mark.asyncio
+async def test_download_command_uses_node_runtime_and_download_options(
+    worker: PrefetchWorker,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    out_path = worker._staging_dir() / "track_runtime.opus"
+
+    async def fake_proc_exec(*args: str, timeout: int | None = None) -> tuple[int, str, str]:
+        captured["args"] = args
+        captured["timeout"] = timeout
+        _write_audio(out_path, 1)
+        return 0, "", ""
+
+    monkeypatch.setattr("manager.prefetch.prefetch.proc_exec", fake_proc_exec)
+
+    result = await worker._download_opus(
+        Track(
+            id=1,
+            youtube_id="track_runtime",
+            title="Runtime Track",
+            duration_sec=120,
+            url="https://youtu.be/track_runtime",
+        ),
+        out_path,
+    )
+
+    args = captured["args"]
+    assert result is True
+    assert isinstance(args, tuple)
+    assert "--no-playlist" in args
+    assert "--extract-audio" in args
+    assert args[args.index("--audio-format") + 1] == "opus"
+    assert args[args.index("--js-runtimes") + 1] == "node"
+    assert captured["timeout"] == worker.config.prefetch.download_timeout_sec
+
+
 def _write_audio(path: Path, mtime: int) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("audio", encoding="utf-8")
