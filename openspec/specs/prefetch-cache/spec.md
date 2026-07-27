@@ -3,13 +3,11 @@
 Фиксирует поведение prefetch worker и audio cache. Prefetch отвечает за
 скачивание audio через yt-dlp, cold/hot cache maintenance, blacklist backoff и
 обновление track cache metadata в PostgreSQL.
-
 ## Requirements
-
 ### Requirement: Missing audio processing
 
-Система SHALL process active tracks without audio path from PostgreSQL and write
-download results back to the track repository.
+Система SHALL process active tracks without audio path from PostgreSQL and write download results back to the track
+repository. The production download path MUST have the JavaScript runtime required by its explicit `yt-dlp` invocation.
 
 #### Scenario: Cold file already exists
 
@@ -20,7 +18,7 @@ download results back to the track repository.
 
 #### Scenario: Download succeeds
 
-- **WHEN** yt-dlp downloads an opus file successfully
+- **WHEN** yt-dlp downloads an opus file successfully with its configured JavaScript runtime
 - **THEN** prefetch measures LUFS when possible
 - **AND** stores audio path, cold cache state, last prefetch time, and reset fail count
 
@@ -37,7 +35,8 @@ download results back to the track repository.
 #### Scenario: Audio download is needed
 
 - **WHEN** prefetch downloads a track
-- **THEN** command uses `yt-dlp`, extracts opus audio, avoids playlists, and uses configured timeout
+- **THEN** command uses `yt-dlp`, extracts opus audio, avoids playlists, uses configured timeout, and requests the
+  `node` JavaScript runtime
 
 #### Scenario: Search discovers metadata
 

@@ -45,7 +45,13 @@ spec:
                   mkdir -p /backups/postgres
                   target="/backups/postgres/radio-$(date -u +%Y%m%dT%H%M%SZ).dump"
                   pg_dump -h postgres -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -Fc > "${target}"
-                  find /backups/postgres -type f -name '*.dump' -mtime +14 -delete
+                  count=0
+                  for backup in $(ls -1t /backups/postgres/radio-*.dump 2>/dev/null || true); do
+                    count=$((count + 1))
+                    if [ "${count}" -gt 14 ]; then
+                      rm -f -- "${backup}"
+                    fi
+                  done
               volumeMounts:
                 - name: radio-cache
                   mountPath: /backups

@@ -87,42 +87,42 @@ export class RadioApiClient {
   }
 
   enqueueNext(payload: EnqueueRequest): Promise<{ queue_id: number }> {
-    return this.post("/queue/append/admin", payload, true);
+    return this.post("/queue/append/admin", payload);
   }
 
   playNow(trackId: number): Promise<{ status: string }> {
-    return this.post(`/tracks/${String(trackId)}/play-now`, undefined, true);
+    return this.post(`/tracks/${String(trackId)}/play-now`);
   }
 
   skip(): Promise<{ status: string }> {
-    return this.post("/queue/skip", undefined, true);
+    return this.post("/queue/skip");
   }
 
   banTrack(trackId: number): Promise<{ status: string }> {
-    return this.post(`/tracks/${String(trackId)}/ban`, undefined, true);
+    return this.post(`/tracks/${String(trackId)}/ban`);
   }
 
   restoreTrack(trackId: number): Promise<{ status: string }> {
-    return this.post(`/tracks/${String(trackId)}/restore`, undefined, true);
+    return this.post(`/tracks/${String(trackId)}/restore`);
   }
 
   retryTrack(trackId: number): Promise<{ status: string }> {
-    return this.post(`/tracks/${String(trackId)}/retry`, undefined, true);
+    return this.post(`/tracks/${String(trackId)}/retry`);
   }
 
   acceptOffer(offerId: number, trackId: number): Promise<{ status: string }> {
-    return this.post(`/offers/${String(offerId)}/accept`, {track_id: trackId}, true);
+    return this.post(`/offers/${String(offerId)}/accept`, {track_id: trackId});
   }
 
   cancelOffer(offerId: number): Promise<{ status: string }> {
-    return this.post(`/offers/${String(offerId)}/cancel`, undefined, true);
+    return this.post(`/offers/${String(offerId)}/cancel`);
   }
 
   private get<T>(path: string): Promise<T> {
     return this.request(path);
   }
 
-  private async post<T>(path: string, body?: unknown, _authorized = false): Promise<T> {
+  private async post<T>(path: string, body?: unknown): Promise<T> {
     const headers: Record<string, string> = {};
     if (body !== undefined) {
       headers["Content-Type"] = "application/json";

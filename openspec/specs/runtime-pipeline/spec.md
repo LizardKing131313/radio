@@ -2,9 +2,7 @@
 
 Defines the end-to-end radio runtime pipeline from search through HLS delivery. The system is built for continuous 24/7
 playback with Kubernetes handling process restarts.
-
 ## Requirements
-
 ### Requirement: Search to prefetch pipeline
 
 The system SHALL discover candidate tracks through YouTube Data API and download audio only through the prefetch path.
@@ -22,7 +20,8 @@ The system SHALL discover candidate tracks through YouTube Data API and download
 
 ### Requirement: Continuous audio output
 
-The runtime SHALL feed Liquidsoap output through FFmpeg into HLS files served by Nginx.
+The runtime SHALL feed Liquidsoap output through the shared FIFO into FFmpeg, which SHALL write advancing HLS files
+served by Nginx. A restart of FFmpeg MUST not require a database migration or a change to the Liquidsoap source graph.
 
 #### Scenario: Cached tracks exist
 
@@ -31,8 +30,9 @@ The runtime SHALL feed Liquidsoap output through FFmpeg into HLS files served by
 
 #### Scenario: FFmpeg restarts
 
-- **WHEN** the FFmpeg container restarts
-- **THEN** it rebuilds HLS output from the runtime audio stream without requiring a database migration
+- **WHEN** the FFmpeg container restarts while Liquidsoap continues running
+- **THEN** FFmpeg recreates its HLS directories and resumes reading the shared FIFO
+- **AND** a new HLS playlist and segments become available without database changes
 
 ### Requirement: Edge-compatible HLS playback
 

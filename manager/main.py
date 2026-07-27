@@ -14,6 +14,7 @@ from manager.hls import exec_ffmpeg_hls
 from manager.logger import configure_logging
 from manager.playback.queue_player import QueuePlayer
 from manager.prefetch.prefetch import PrefetchWorker
+from manager.retention import run_retention
 from manager.search.search_service import run_search_loop
 from manager.track_queue.db import check_database_schema
 
@@ -22,7 +23,12 @@ def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="radio-manager")
     parser.add_argument(
         "command",
-        choices=["db-check", "search", "prefetch", "queue-player", "ffmpeg-hls"],
+        choices=["db-check", "search", "prefetch", "queue-player", "ffmpeg-hls", "retention"],
+    )
+    parser.add_argument(
+        "--delete",
+        action="store_true",
+        help="Apply retention deletions; without it retention is a dry-run.",
     )
     args = parser.parse_args(argv)
 
@@ -42,6 +48,8 @@ def run(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "ffmpeg-hls":
             return exec_ffmpeg_hls()
+        if args.command == "retention":
+            return run_retention(dry_run=not args.delete)
     except (KeyboardInterrupt, SystemExit):
         return 0
     return 2

@@ -179,6 +179,20 @@ class TracksRepo:
             ).all()
             return [track_from_orm(row) for row in rows]
 
+    def list_audio_paths(self, *, status: str = "active") -> list[str]:
+        """Return cache paths referenced by tracks in the requested catalog state."""
+        statement = (
+            select(TrackRow.audio_path)
+            .where(
+                *_track_status_filters(status),
+                TrackRow.audio_path.is_not(None),
+                TrackRow.audio_path != "",
+            )
+            .order_by(TrackRow.id)
+        )
+        with self.db.session() as session:
+            return [str(path) for path in session.scalars(statement).all() if path]
+
     def touch_play(self, track_id: int) -> None:
         with self.db.session() as session:
             session.execute(

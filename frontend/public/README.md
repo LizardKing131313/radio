@@ -19,16 +19,15 @@ This folder contains the complete favicon and PWA icon set.
 ## HTML head
 
 ```html
-
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32x32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon-16x16.png" sizes="16x16" type="image/png">
-<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-<link rel="manifest" href="/site.webmanifest">
-<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#10343C">
-<meta name="theme-color" content="#10343C">
-<meta name="msapplication-TileColor" content="#10343C">
-<meta name="msapplication-config" content="/browserconfig.xml">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="icon" href="/favicon-32x32.png" sizes="32x32" type="image/png" />
+<link rel="icon" href="/favicon-16x16.png" sizes="16x16" type="image/png" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+<link rel="manifest" href="/site.webmanifest" />
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#10343C" />
+<meta name="theme-color" content="#10343C" />
+<meta name="msapplication-TileColor" content="#10343C" />
+<meta name="msapplication-config" content="/browserconfig.xml" />
 ```
 
 Copy the files to the public root of the website. If the site is mounted under a subdirectory, update the leading `/`

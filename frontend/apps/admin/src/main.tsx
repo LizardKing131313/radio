@@ -46,7 +46,7 @@ function App() {
       setPassword("");
       setAuthenticated(true);
       await loadAll();
-    } catch (caught) {
+    } catch {
       setError("Неверное имя пользователя или пароль");
     }
   }

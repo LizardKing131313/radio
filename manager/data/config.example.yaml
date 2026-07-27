@@ -5,6 +5,7 @@ paths:
   data: /opt/radio/data
   cache_cold: /opt/radio/cache/cold
   cache_hot: /opt/radio/cache/hot
+  backup_dir: /opt/radio/cache/postgres
   runtime_fifo_dir: /opt/radio/runtime/fifo
   runtime_info_dir: /opt/radio/runtime/info
   fifo_audio_path: /opt/radio/runtime/fifo/radio.wav
@@ -26,6 +27,9 @@ search:
   window_size: 50
   max_windows_per_tick: 3
   quota_backoff_sec: 43200
+
+retention:
+  backup_keep_count: 14
 
 # Secrets are intentionally left empty in YAML.
 # Provide them via environment variables:

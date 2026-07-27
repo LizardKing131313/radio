@@ -21,6 +21,7 @@ class Paths(BaseModel):
     cache_cold: Path = Field(default=Path("/opt/radio/cache/cold"))
     cache_hot: Path = Field(default=Path("/opt/radio/cache/hot"))
     cache_blacklist: Path = Field(default=Path("/opt/radio/cache/blacklist"))
+    backup_dir: Path = Field(default=Path("/opt/radio/cache/postgres"))
     runtime_fifo_dir: Path = Field(default=Path("/opt/radio/runtime/fifo"))
     runtime_info_dir: Path = Field(default=Path("/opt/radio/runtime/info"))
     fifo_audio_path: Path = Field(default=Path("/opt/radio/runtime/fifo/radio.wav"))
@@ -57,6 +58,10 @@ class PrefetchSetting(BaseModel):
     batch_size: int = Field(default=100)
     download_timeout_sec: int = Field(default=600)
     concurrent_downloads: int = Field(default=4)
+
+
+class RetentionSettings(BaseModel):
+    backup_keep_count: int = Field(default=14)
 
 
 class DatabaseSettings(BaseModel):
@@ -135,6 +140,7 @@ class AppConfig(BaseSettings):
     hls: HLSSettings = Field(default_factory=HLSSettings)
     search: SearchSettings = Field(default_factory=SearchSettings)
     prefetch: PrefetchSetting = Field(default_factory=PrefetchSetting)
+    retention: RetentionSettings = Field(default_factory=RetentionSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     secrets: Secrets = Field(default_factory=Secrets)
 
@@ -207,6 +213,7 @@ __all__ = [
     "MissingConfigError",
     "Paths",
     "PrefetchSetting",
+    "RetentionSettings",
     "SearchSettings",
     "Secrets",
     "get_settings",

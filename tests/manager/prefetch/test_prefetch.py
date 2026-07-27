@@ -57,6 +57,7 @@ async def test_hot_cache_moves_files_without_cold_duplicates(
 
     hot_b = worker.config.paths.cache_hot / "track_b.opus"
     hot_c = worker.config.paths.cache_hot / "track_c.opus"
+    worker.tracks.ban(track_ids["track_c"])
     os.utime(hot_c, (10, 10))
     os.utime(hot_b, (20, 20))
     cold_d = _write_audio(worker.config.paths.cache_cold / "track_d.opus", 30)
@@ -109,6 +110,22 @@ async def test_process_track_uses_existing_hot_file(worker: PrefetchWorker) -> N
     assert track.cache_state == "hot"
     assert track.audio_path == str(hot_path)
     assert not (worker.config.paths.cache_cold / "track_hot.opus").exists()
+
+
+@pytest.mark.asyncio
+async def test_cold_quota_preserves_audio_referenced_by_active_catalog(
+    worker: PrefetchWorker,
+) -> None:
+    track_id = worker.tracks.upsert("protected", "Protected", 120)
+    protected = _write_audio(worker.config.paths.cache_cold / "protected.opus", 1)
+    orphan = _write_audio(worker.config.paths.cache_cold / "orphan.opus", 2)
+    worker.tracks.update_track_audio(track_id=track_id, audio_path=str(protected))
+    worker.config.prefetch.cold_quota_bytes = protected.stat().st_size
+
+    await worker._enforce_cold_quota()
+
+    assert protected.exists()
+    assert not orphan.exists()
 
 
 @pytest.mark.asyncio

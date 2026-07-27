@@ -41,6 +41,9 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: postgres-backup
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: radio-retention
       ports:
         - protocol: TCP
           port: 5432

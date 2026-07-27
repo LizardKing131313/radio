@@ -10,9 +10,10 @@ from manager.config import AppConfig, get_settings
 from manager.logger import get_logger
 from manager.prefetch.data import BlacklistState, Metrics
 from manager.prefetch.utils import SuppressTask, iterate_files, proc_exec, watch_url
+from manager.retention import file_records, select_audio_plan
 from manager.track_queue.db import Database
 from manager.track_queue.models import Track
-from manager.track_queue.repo import TracksRepo
+from manager.track_queue.repo import QueueRepo, TracksRepo
 
 AUDIO_SUFFIXES = {".opus"}
 
@@ -25,6 +26,7 @@ class PrefetchWorker:
         # удален, потому что оркестрацию теперь делает Kubernetes.
         self.database = Database(app_config=self.config)
         self.tracks = TracksRepo(self.database)
+        self.queue = QueueRepo(self.database)
         self.metrics = Metrics()
         self.blacklist = BlacklistState.load(self.config.paths.cache_blacklist)
 
@@ -272,22 +274,33 @@ class PrefetchWorker:
 
     async def _enforce_cold_quota(self) -> None:
         # Если PVC под холодный кеш переполнен, удаляем самые старые файлы.
-        files = _files_by_mtime(self.config.paths.cache_cold)
-        total = sum(size for _path, _mtime, size in files)
-        for path, _mtime, size in files:
-            if total <= self.config.prefetch.cold_quota_bytes:
-                break
+        plan = select_audio_plan(
+            file_records(self.config.paths.cache_cold),
+            quota_bytes=self.config.prefetch.cold_quota_bytes,
+            protected_paths=self._protected_audio_paths(),
+        )
+        for path in plan.selected:
             with SuppressTask():
                 path.unlink()
-            total -= size
 
     async def _enforce_hot_count(self) -> None:
         # Горячий кеш держим коротким, иначе Liquidsoap будет слишком долго гулять
         # по старому рабочему набору.
         files = _files_by_mtime(self.config.paths.cache_hot)
+        protected = {path.resolve(strict=False) for path in self._protected_audio_paths()}
+        eligible = [item for item in files if item[0].resolve(strict=False) not in protected]
         overflow = len(files) - self.config.prefetch.hot_max_items
-        for index in range(max(0, overflow)):
-            await self._demote_to_cold(files[index][0])
+        for path, _mtime, _size in eligible[: max(0, overflow)]:
+            await self._demote_to_cold(path)
+
+    def _protected_audio_paths(self) -> set[Path]:
+        # Active catalog paths plus queued/playing items must remain readable
+        # while cache maintenance runs.
+        protected = {Path(path) for path in self.tracks.list_audio_paths(status="active")}
+        for _item, track in self.queue.list_visible(limit=10000):
+            if track.audio_path:
+                protected.add(Path(track.audio_path))
+        return protected
 
     async def _demote_to_cold(self, hot_path: Path) -> Path:
         cold_path = self.config.paths.cache_cold / hot_path.name

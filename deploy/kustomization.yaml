@@ -9,6 +9,7 @@ resources:
   - k8s/secret.yaml
   - k8s/postgres.yaml
   - k8s/postgres-backup.yaml
+  - k8s/retention.yaml
   - k8s/alembic-job.yaml
   - k8s/app.yaml
   - k8s/issuer.yaml

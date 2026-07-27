@@ -5,6 +5,7 @@ paths:
   cache_cold: /opt/radio/cache/cold
   cache_hot: /opt/radio/cache/hot
   cache_blacklist: /opt/radio/cache/blacklist/state.json
+  backup_dir: /opt/radio/cache/postgres
   runtime_fifo_dir: /opt/radio/runtime/fifo
   runtime_info_dir: /opt/radio/runtime/info
   fifo_audio_path: /opt/radio/runtime/fifo/radio.wav
@@ -34,3 +35,6 @@ prefetch:
   batch_size: 100
   download_timeout_sec: 600
   concurrent_downloads: 4
+
+retention:
+  backup_keep_count: 14
