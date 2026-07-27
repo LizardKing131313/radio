@@ -108,3 +108,15 @@ routing.
 - **WHEN** Nginx receives a request for a player, admin, manifest, service worker, or static asset route
 - **THEN** it routes the request to the component that serves built web-client files
 - **AND** the request does not require an additional Kubernetes Service
+
+### Requirement: Scheduled retention workload
+
+The Kubernetes deployment SHALL include a dedicated CronJob for retention that uses the production application image,
+the PostgreSQL Secret, the radio config ConfigMap, and the existing cache PVC.
+
+#### Scenario: Retention CronJob is rendered
+
+- **WHEN** `kubectl kustomize deploy` renders the manifests
+- **THEN** a retention CronJob is present with `concurrencyPolicy: Forbid`
+- **AND** its command runs `python -m manager retention --delete`
+- **AND** it mounts the cache PVC and can reach PostgreSQL

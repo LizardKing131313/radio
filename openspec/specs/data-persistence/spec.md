@@ -3,9 +3,7 @@
 Defines where durable and ephemeral state lives. The project uses PostgreSQL for
 domain data, Alembic for schema ownership, Kubernetes Secret for secrets, and the
 filesystem for audio/runtime/HLS artifacts.
-
 ## Requirements
-
 ### Requirement: PostgreSQL domain ownership
 
 The system SHALL store durable domain entities in PostgreSQL when integrity,
@@ -33,8 +31,9 @@ the migration job before application containers depend on the new schema.
 
 ### Requirement: Filesystem artifact ownership
 
-The system SHALL keep audio cache, FIFO/runtime files, and HLS output in the
-filesystem instead of PostgreSQL or Redis.
+The system SHALL keep audio cache, FIFO/runtime files, HLS output, and PostgreSQL backup artifacts in the filesystem
+instead of PostgreSQL or Redis. Retention operations MUST use PostgreSQL metadata only to protect referenced audio and
+MUST NOT move filesystem artifacts into domain tables.
 
 #### Scenario: Prefetch downloads audio
 
@@ -46,6 +45,12 @@ filesystem instead of PostgreSQL or Redis.
 
 - **WHEN** the radio pod is recreated
 - **THEN** FIFO, nowplaying, YouTube runtime JSON, and HLS output may be recreated from runtime processes
+
+#### Scenario: Retention reads protected state
+
+- **WHEN** retention evaluates audio candidates
+- **THEN** it reads track and playback references from PostgreSQL
+- **AND** it deletes or reports only filesystem artifacts under configured retention roots
 
 ### Requirement: Secrets stay out of git
 
