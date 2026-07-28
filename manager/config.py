@@ -64,6 +64,12 @@ class RetentionSettings(BaseModel):
     backup_keep_count: int = Field(default=14)
 
 
+class YouTubeLiveSettings(BaseModel):
+    video_id: str = Field(default="")
+    refresh_sec: int = Field(default=60)
+    state_path: Path = Field(default=Path("/opt/radio/runtime/info/youtube_live.json"))
+
+
 class DatabaseSettings(BaseModel):
     """
     Настройки подключения к PostgreSQL.
@@ -141,6 +147,7 @@ class AppConfig(BaseSettings):
     search: SearchSettings = Field(default_factory=SearchSettings)
     prefetch: PrefetchSetting = Field(default_factory=PrefetchSetting)
     retention: RetentionSettings = Field(default_factory=RetentionSettings)
+    youtube_live: YouTubeLiveSettings = Field(default_factory=YouTubeLiveSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     secrets: Secrets = Field(default_factory=Secrets)
 
@@ -216,5 +223,6 @@ __all__ = [
     "RetentionSettings",
     "SearchSettings",
     "Secrets",
+    "YouTubeLiveSettings",
     "get_settings",
 ]

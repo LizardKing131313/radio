@@ -27,6 +27,7 @@ from manager.search.telemetry import read_youtube_api_telemetry
 from manager.track_queue.db import Database
 from manager.track_queue.models import Track
 from manager.track_queue.repo import OffersRepo, QueueRepo, TracksRepo
+from manager.youtube_live import empty_live_state, read_live_state
 
 router = APIRouter()
 
@@ -82,6 +83,11 @@ def current(database: DatabaseDep) -> dict[str, object | None]:
     return {
         "now_playing": current_snapshot(settings),
         "queue": queue_entry(current_item) if current_item is not None else None,
+        "youtube_live": (
+            read_live_state(settings.youtube_live.state_path)
+            if settings.youtube_live.video_id
+            else empty_live_state()
+        ),
     }
 
 

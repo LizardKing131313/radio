@@ -38,3 +38,8 @@ prefetch:
 
 retention:
   backup_keep_count: 14
+
+youtube_live:
+  video_id: ""
+  refresh_sec: 60
+  state_path: /opt/radio/runtime/info/youtube_live.json

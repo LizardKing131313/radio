@@ -207,6 +207,19 @@ def test_health_queue_current_and_admin_enqueue(api_context: tuple[TestClient, D
             },
         },
         "queue": None,
+        "youtube_live": {
+            "status": "disabled",
+            "video_id": None,
+            "title": None,
+            "channel": None,
+            "broadcast_status": None,
+            "scheduled_start_time": None,
+            "actual_start_time": None,
+            "actual_end_time": None,
+            "updated_at": None,
+            "last_success_at": None,
+            "last_error": None,
+        },
     }
     client.post("/auth/logout")
     assert client.post("/queue/append", json={"track_id": track_id}).status_code == 401

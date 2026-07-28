@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+from contextlib import suppress
 from datetime import UTC, datetime
 
 from structlog.typing import FilteringBoundLogger
@@ -18,6 +19,7 @@ from manager.search.telemetry import (
 )
 from manager.track_queue.db import Database
 from manager.track_queue.repo import TracksRepo
+from manager.youtube_live import live_refresh_interval, refresh_live_metadata
 
 
 async def run_search_loop(config: AppConfig | None = None) -> None:
@@ -34,18 +36,52 @@ async def run_search_loop(config: AppConfig | None = None) -> None:
         log.info("search startup delayed by telemetry", sleep_sec=startup_sleep_sec)
         await asyncio.sleep(startup_sleep_sec)
 
+    live_task = (
+        asyncio.create_task(_run_live_metadata_loop(cfg, log))
+        if cfg.youtube_live.video_id
+        else None
+    )
+    try:
+        while True:
+            sleep_sec = _next_sleep_sec(cfg)
+            try:
+                upserted = await search_once(cfg, tracks_repo, log)
+                log.info("search tick ok", upserted=upserted)
+            except YouTubeAPIError as exception:
+                record_youtube_api_error(cfg.paths.youtube_telemetry_path, exception)
+                sleep_sec = _next_sleep_sec(cfg, exception)
+                log.warning("youtube api failed", error=str(exception), retry_after_sec=sleep_sec)
+            except Exception as exception:
+                log.warning("search tick failed", error=str(exception))
+            await asyncio.sleep(sleep_sec)
+    finally:
+        if live_task is not None:
+            live_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await live_task
+        database.close()
+
+
+async def _run_live_metadata_loop(
+    config: AppConfig,
+    log: FilteringBoundLogger,
+) -> None:
+    refresh_sec = live_refresh_interval(config.youtube_live.refresh_sec)
     while True:
-        sleep_sec = _next_sleep_sec(cfg)
         try:
-            upserted = await search_once(cfg, tracks_repo, log)
-            log.info("search tick ok", upserted=upserted)
+            await asyncio.get_running_loop().run_in_executor(
+                None,
+                refresh_live_metadata,
+                config.youtube_live.state_path,
+                config.youtube_live.video_id,
+                config.secrets.youtube_api_key.get_secret_value(),
+            )
+            log.info("youtube live metadata refreshed")
         except YouTubeAPIError as exception:
-            record_youtube_api_error(cfg.paths.youtube_telemetry_path, exception)
-            sleep_sec = _next_sleep_sec(cfg, exception)
-            log.warning("youtube api failed", error=str(exception), retry_after_sec=sleep_sec)
+            log.warning("youtube live metadata refresh failed", error=str(exception))
         except Exception as exception:
-            log.warning("search tick failed", error=str(exception))
-        await asyncio.sleep(sleep_sec)
+            log.warning("youtube live metadata tick failed", error=str(exception))
+        await asyncio.sleep(refresh_sec)
 
 
 async def search_once(config: AppConfig, tracks_repo: TracksRepo, log: FilteringBoundLogger) -> int:
