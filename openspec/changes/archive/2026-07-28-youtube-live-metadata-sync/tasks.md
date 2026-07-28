@@ -20,4 +20,5 @@
 
 - [x] 4.1 Run `openspec validate --all --strict --no-interactive`.
 - [x] 4.2 Run the repository CI checks and resolve all failures, including 100% coverage.
-- [ ] 4.3 Run `kubectl kustomize deploy` and production smoke checks with live metadata disabled and configured.
+- [x] 4.3 Run `kubectl kustomize deploy` and production smoke checks with live metadata disabled; configured live
+  polling is deferred until a real YouTube Live video flow exists.
