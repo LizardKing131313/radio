@@ -260,8 +260,20 @@ def test_health_queue_current_and_admin_enqueue(api_context: tuple[TestClient, D
     assert "text/plain" in prometheus.headers["content-type"]
     assert 'radio_tracks_total{status="active"} 1' in prometheus.text
     assert "radio_queue_visible_items 2" in prometheus.text
+    assert 'radio_queue_items{status="pending"} 1' in prometheus.text
+    assert 'radio_queue_items{status="playing"} 1' in prometheus.text
     assert "radio_youtube_quota_exhausted 0" in prometheus.text
     assert "radio_hls_live_offset_seconds 6" in prometheus.text
+    assert "radio_hls_is_probably_audible 0" in prometheus.text
+
+
+def test_prometheus_is_public_but_json_metrics_are_protected(
+    api_context: tuple[TestClient, Database],
+) -> None:
+    client, _database = api_context
+    client.post("/auth/logout")
+    assert client.get("/metrics/prometheus").status_code == 200
+    assert client.get("/metrics").status_code == 401
 
 
 def test_offer_endpoints_and_admin_actions(api_context: tuple[TestClient, Database]) -> None:

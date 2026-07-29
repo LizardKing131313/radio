@@ -9,43 +9,31 @@ The radio is deployed and running in production. The public runtime check confir
 - The HLS media sequence advanced from `1785107306` to `1785107310` over eight seconds.
 - A new origin/edge rollout is not currently required.
 
-## Immediate Actions
+## Completed
 
-1. Run a controlled operational acceptance check:
-
-- restart FFmpeg and verify HLS recovery;
-- restart prefetch and verify the Node.js/yt-dlp runtime;
-- verify manual queue insertion and playback state transitions;
-- create a PostgreSQL backup and verify the dump;
-- verify that production secrets are not tracked by Git.
-
-2. Record the results in the production runtime change notes or runtime documentation.
-3. Archive the completed OpenSpec changes:
-
-- `add-player-pwa-admin-frontend`;
-- `stabilize-production-runtime`.
+- Production runtime acceptance checks completed.
+- `add-player-pwa-admin-frontend` archived.
+- `stabilize-production-runtime` archived.
+- `retention-data-lifecycle` implemented, deployed, accepted, and archived.
+- YouTube Live metadata synchronization implemented, accepted with live polling disabled, and archived.
+- Runtime monitoring implemented, production scrape accepted, and archived.
 
 ## Next OpenSpec Change
 
-The next recommended change is **retention and data lifecycle**.
+The next recommended change is **stronger admin authentication**, if the admin panel remains publicly exposed.
 
 Goals:
 
-- prevent unbounded growth of `cache/cold`;
-- define safe deletion of old audio files;
-- preserve tracks referenced by the queue or current playback;
-- define PostgreSQL backup retention;
-- add dry-run behavior and tests for deletion decisions;
-- avoid API, Liquidsoap, Kubernetes topology, and schema changes unless required.
+- define how live stream metadata is discovered and refreshed;
+- expose the metadata through the existing now-playing/runtime path;
+- preserve the current queue and HLS pipeline;
+- avoid RTMP push or stream-key configuration until an actual live push flow exists.
 
 Implementation order:
 
-1. Create the OpenSpec proposal, spec delta, design, and tasks.
-2. Add tests for file selection and protection of active tracks.
-3. Implement the smallest retention path.
-4. Validate against local and production-like cache data.
-5. Run `make ci` and perform a controlled deployment.
-6. Verify free disk space and that playable or active tracks were not removed.
+1. Decide whether the public admin panel needs stronger authentication than the current configured password/session.
+2. If yes, create a separate OpenSpec change for the authentication boundary and rollout.
+3. Revisit YouTube Live configured polling only when a real live video flow exists.
 
 ## Later Backlog
 

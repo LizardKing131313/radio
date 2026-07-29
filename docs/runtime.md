@@ -192,6 +192,23 @@ npm install
 npm run check
 ```
 
+## Runtime monitoring
+
+Prometheus can scrape `https://RADIO_EDGE_DOMAIN/api/metrics/prometheus` without the admin browser cookie. The JSON
+`/api/metrics` endpoint remains admin-protected. The exposition includes catalog status gauges, queue status gauges, HLS
+nowplaying age and audibility, and YouTube API quota/error counters.
+
+Useful initial alert thresholds:
+
+- alert when `radio_hls_is_probably_audible == 0` for 2 minutes;
+- alert when `radio_hls_nowplaying_age_seconds > 120` for 2 minutes;
+- alert when `radio_queue_items{status="failed"} > 0` for 5 minutes;
+- alert when `radio_tracks_total{status="failed"} > 0` for 10 minutes;
+- alert when `radio_youtube_quota_exhausted == 1`.
+
+These thresholds are intentionally operator-side examples. This repository does not install Prometheus, Alertmanager, or
+Grafana.
+
 Production Docker build сам выполняет `npm ci` и копирует `frontend/dist` в
 `/opt/radio/www/html`; отдельного Node runtime контейнера нет.
 

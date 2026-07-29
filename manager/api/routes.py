@@ -100,7 +100,6 @@ def metrics(database: DatabaseDep) -> dict[str, object]:
 @router.get(
     "/metrics/prometheus",
     response_class=PlainTextResponse,
-    dependencies=[Depends(require_admin_session)],
 )
 def metrics_prometheus(database: DatabaseDep) -> PlainTextResponse:
     settings = get_settings()
@@ -117,6 +116,7 @@ def runtime_metrics(database: Database, settings: AppConfig) -> dict[str, object
         "status": "ok",
         "tracks": TracksRepo(database).stats(),
         "queue": {
+            "stats": queue_repo.stats(),
             "visible": [queue_entry(item) for item in queue_repo.list_visible(limit=50)],
             "history": [queue_entry(item) for item in queue_repo.history(limit=20)],
         },
@@ -127,12 +127,13 @@ def runtime_metrics(database: Database, settings: AppConfig) -> dict[str, object
 
 def prometheus_text(snapshot: dict[str, object]) -> str:
     tracks = cast(dict[str, int], snapshot["tracks"])
-    queue = cast(dict[str, list[dict[str, object]]], snapshot["queue"])
+    queue = cast(dict[str, object], snapshot["queue"])
     current_data = cast(dict[str, object], snapshot["current"])
     youtube_api = cast(dict[str, object], snapshot["youtube_api"])
     hls = cast(dict[str, object], current_data["hls"])
-    visible = queue["visible"]
-    history = queue["history"]
+    visible = cast(list[dict[str, object]], queue["visible"])
+    history = cast(list[dict[str, object]], queue["history"])
+    queue_stats = cast(dict[str, int], queue["stats"])
 
     # Prometheus endpoint намеренно строится из того же snapshot, что и JSON /metrics.
     # Так мониторинг и человек в админке смотрят на один источник правды.
@@ -152,6 +153,12 @@ def prometheus_text(snapshot: dict[str, object]) -> str:
             "# HELP radio_queue_history_items Завершенные элементы ручной очереди.",
             "# TYPE radio_queue_history_items gauge",
             f"radio_queue_history_items {len(history)}",
+            "# HELP radio_queue_items Queue items by lifecycle status.",
+            "# TYPE radio_queue_items gauge",
+            *[
+                f'radio_queue_items{{status="{prometheus_label(status_name)}"}} {int(count)}'
+                for status_name, count in sorted(queue_stats.items())
+            ],
             "# HELP radio_youtube_quota_exhausted YouTube Data API вернул quota/rate limit.",
             "# TYPE radio_youtube_quota_exhausted gauge",
             f"radio_youtube_quota_exhausted {int(bool(youtube_api.get('quota_exhausted')))}",
@@ -167,6 +174,9 @@ def prometheus_text(snapshot: dict[str, object]) -> str:
             "# HELP radio_hls_nowplaying_age_seconds Возраст последнего nowplaying от Liquidsoap.",
             "# TYPE radio_hls_nowplaying_age_seconds gauge",
             f"radio_hls_nowplaying_age_seconds {int(cast(int | None, hls.get('age_sec')) or 0)}",
+            "# HELP radio_hls_is_probably_audible Whether current nowplaying is past the configured HLS offset.",
+            "# TYPE radio_hls_is_probably_audible gauge",
+            f"radio_hls_is_probably_audible {int(bool(hls.get('is_probably_audible')))}",
         ]
     )
     return "\n".join(lines) + "\n"

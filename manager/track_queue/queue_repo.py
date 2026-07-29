@@ -35,6 +35,13 @@ class QueueRepo:
             )
             return float(sort_key) if sort_key is not None else None
 
+    def stats(self) -> dict[str, int]:
+        with self.db.session() as session:
+            rows = session.execute(
+                select(QueueItemRow.status, func.count()).group_by(QueueItemRow.status)
+            ).all()
+            return {str(status): int(count) for status, count in rows}
+
     def _insert_item(
         self,
         track_id: int,
