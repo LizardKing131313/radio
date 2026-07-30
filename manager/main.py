@@ -9,7 +9,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+import time
 
+from manager.config import get_settings
+from manager.health import check_component
 from manager.hls import exec_ffmpeg_hls
 from manager.logger import configure_logging
 from manager.playback.queue_player import QueuePlayer
@@ -23,13 +26,25 @@ def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="radio-manager")
     parser.add_argument(
         "command",
-        choices=["db-check", "search", "prefetch", "queue-player", "ffmpeg-hls", "retention"],
+        choices=[
+            "db-check",
+            "health",
+            "search",
+            "prefetch",
+            "queue-player",
+            "ffmpeg-hls",
+            "retention",
+        ],
     )
     parser.add_argument(
         "--delete",
         action="store_true",
         help="Apply retention deletions; without it retention is a dry-run.",
     )
+    parser.add_argument(
+        "--component", choices=["search", "prefetch", "queue-player", "liquidsoap", "ffmpeg"]
+    )
+    parser.add_argument("--max-age", type=int, default=120)
     args = parser.parse_args(argv)
 
     configure_logging()
@@ -37,6 +52,14 @@ def run(argv: list[str] | None = None) -> int:
     try:
         if args.command == "db-check":
             return check_database_schema()
+        if args.command == "health":
+            if args.component is None:
+                parser.error("health requires --component")
+            return (
+                0
+                if check_component(get_settings(), args.component, args.max_age, now=time.time())
+                else 1
+            )
         if args.command == "search":
             asyncio.run(run_search_loop())
             return 0

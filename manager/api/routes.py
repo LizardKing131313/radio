@@ -68,6 +68,16 @@ def admin_logout() -> JSONResponse:
 
 @router.get("/health")
 def health(database: DatabaseDep) -> dict[str, object]:
+    return health_ready(database)
+
+
+@router.get("/health/live")
+def health_live() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@router.get("/health/ready")
+def health_ready(database: DatabaseDep) -> dict[str, object]:
     database.ensure_schema()
     settings = get_settings()
     return {

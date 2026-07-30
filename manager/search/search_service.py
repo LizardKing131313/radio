@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import math
+import time
 from contextlib import suppress
 from datetime import UTC, datetime
 
 from structlog.typing import FilteringBoundLogger
 
 from manager.config import AppConfig, get_settings
+from manager.health import heartbeat_path, write_heartbeat
 from manager.logger import get_logger
 from manager.search.search_helpers import YouTubeAPIError, search_title_page
 from manager.search.telemetry import (
@@ -28,13 +30,18 @@ async def run_search_loop(config: AppConfig | None = None) -> None:
     database = Database(app_config=cfg)
     database.ensure_schema()
     tracks_repo = TracksRepo(database)
+    health_path = heartbeat_path(cfg, "search")
+    write_heartbeat(health_path)
 
     # Цикл специально простой: Kubernetes перезапускает контейнер, а Postgres
     # дедуплицирует треки по youtube_id через TracksRepo.upsert().
     startup_sleep_sec = _startup_sleep_sec(cfg)
     if startup_sleep_sec > 0:
         log.info("search startup delayed by telemetry", sleep_sec=startup_sleep_sec)
-        await asyncio.sleep(startup_sleep_sec)
+        deadline = time.monotonic() + startup_sleep_sec
+        while (remaining := deadline - time.monotonic()) > 0:
+            await asyncio.sleep(min(30, remaining))
+            write_heartbeat(health_path)
 
     live_task = (
         asyncio.create_task(_run_live_metadata_loop(cfg, log))
@@ -46,6 +53,7 @@ async def run_search_loop(config: AppConfig | None = None) -> None:
             sleep_sec = _next_sleep_sec(cfg)
             try:
                 upserted = await search_once(cfg, tracks_repo, log)
+                write_heartbeat(health_path)
                 log.info("search tick ok", upserted=upserted)
             except YouTubeAPIError as exception:
                 record_youtube_api_error(cfg.paths.youtube_telemetry_path, exception)
@@ -53,7 +61,10 @@ async def run_search_loop(config: AppConfig | None = None) -> None:
                 log.warning("youtube api failed", error=str(exception), retry_after_sec=sleep_sec)
             except Exception as exception:
                 log.warning("search tick failed", error=str(exception))
-            await asyncio.sleep(sleep_sec)
+            deadline = time.monotonic() + sleep_sec
+            while (remaining := deadline - time.monotonic()) > 0:
+                await asyncio.sleep(min(30, remaining))
+                write_heartbeat(health_path)
     finally:
         if live_task is not None:
             live_task.cancel()

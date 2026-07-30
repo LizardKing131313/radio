@@ -125,6 +125,12 @@ spec:
             initialDelaySeconds: 10
             timeoutSeconds: 5
             periodSeconds: 30
+          livenessProbe:
+            exec:
+              command: [ "python", "-m", "manager", "health", "--component", "search", "--max-age", "900" ]
+            initialDelaySeconds: 30
+            timeoutSeconds: 5
+            periodSeconds: 30
         # Prefetch - единственный контейнер, где запускается yt-dlp.
         - name: prefetch
           image: radio-manager:latest
@@ -139,10 +145,18 @@ spec:
               mountPath: /opt/radio/data
             - name: radio-cache
               mountPath: /opt/radio/cache
+            - name: radio-runtime
+              mountPath: /opt/radio/runtime
           readinessProbe:
             exec:
               command: [ "python", "-m", "manager", "db-check" ]
             initialDelaySeconds: 10
+            timeoutSeconds: 5
+            periodSeconds: 30
+          livenessProbe:
+            exec:
+              command: [ "python", "-m", "manager", "health", "--component", "prefetch", "--max-age", "900" ]
+            initialDelaySeconds: 30
             timeoutSeconds: 5
             periodSeconds: 30
         # Queue player - мост между Postgres queue_items и Liquidsoap request.queue.
@@ -168,6 +182,12 @@ spec:
             initialDelaySeconds: 10
             timeoutSeconds: 5
             periodSeconds: 30
+          livenessProbe:
+            exec:
+              command: [ "python", "-m", "manager", "health", "--component", "queue-player", "--max-age", "120" ]
+            initialDelaySeconds: 30
+            timeoutSeconds: 5
+            periodSeconds: 30
         # API - тонкая HTTP-обертка над репозиториями, без управления процессами.
         - name: api
           image: radio-manager:latest
@@ -189,7 +209,13 @@ spec:
               mountPath: /opt/radio/cache
           readinessProbe:
             httpGet:
-              path: /health
+              path: /health/ready
+              port: api
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          livenessProbe:
+            httpGet:
+              path: /health/live
               port: api
             initialDelaySeconds: 10
             periodSeconds: 30
@@ -206,6 +232,13 @@ spec:
               mountPath: /opt/radio/cache
             - name: radio-runtime
               mountPath: /opt/radio/runtime
+          livenessProbe:
+            exec:
+              command: [ "python", "-m", "manager", "health", "--component", "liquidsoap", "--max-age", "900" ]
+            initialDelaySeconds: 120
+            timeoutSeconds: 15
+            periodSeconds: 30
+            failureThreshold: 3
         # Python только собирает args, затем exec-ом заменяется на ffmpeg.
         - name: ffmpeg
           image: radio-manager:latest
@@ -219,6 +252,13 @@ spec:
               mountPath: /opt/radio/runtime
             - name: radio-www
               mountPath: /opt/radio/www
+          livenessProbe:
+            exec:
+              command: [ "python", "-m", "manager", "health", "--component", "ffmpeg", "--max-age", "120" ]
+            initialDelaySeconds: 120
+            timeoutSeconds: 15
+            periodSeconds: 15
+            failureThreshold: 3
         # Nginx отдает HLS из общего emptyDir и проксирует /api/.
         # Наружу его публикует ingress-nginx через Service radio.
         - name: nginx
@@ -238,6 +278,12 @@ spec:
               port: nginx
             initialDelaySeconds: 3
             periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: nginx
+            initialDelaySeconds: 10
+            periodSeconds: 20
       volumes:
         # ConfigMap хранит только несекретный статический конфиг.
         - name: radio-config

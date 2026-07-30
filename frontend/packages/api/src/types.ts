@@ -50,6 +50,7 @@ export interface MetricsResponse {
   status?: string;
   tracks?: Record<string, number>;
   queue?: {
+    stats?: Record<string, number>;
     visible?: QueueEntry[];
     history?: QueueEntry[];
   };

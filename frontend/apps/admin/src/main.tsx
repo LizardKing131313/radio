@@ -13,6 +13,7 @@ import {useCallback, useEffect, useState} from "preact/hooks";
 
 import "../../shared/styles.css";
 import {performTrackAction, skipCurrent, type TrackAction} from "./actions";
+import {runtimeSummary} from "./runtime";
 
 const api = new RadioApiClient({baseUrl: defaultApiBase()});
 
@@ -96,6 +97,12 @@ function App() {
     if (authenticated) void loadAll();
   }, [authenticated, loadAll]);
 
+  useEffect(() => {
+    if (!authenticated) return undefined;
+    const timer = window.setInterval(() => void loadAll(), 15_000);
+    return () => window.clearInterval(timer);
+  }, [authenticated, loadAll]);
+
   if (!authenticated) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#102225] px-4 text-[#f5efe0]">
@@ -162,6 +169,8 @@ function App() {
           <Stat title="YouTube" value={youtubeStatus(metrics?.youtube_api)}/>
           <Stat title="Треки" value={statsSummary === "" ? "нет данных" : statsSummary}/>
         </section>
+
+        <RuntimePanel metrics={metrics}/>
 
         <section className="mt-5 flex flex-wrap gap-3">
           <button
@@ -240,6 +249,36 @@ function App() {
         </section>
       </section>
     </main>
+  );
+}
+
+function RuntimePanel({metrics}: { metrics: MetricsResponse | null }) {
+  const summary = runtimeSummary(metrics);
+  return (
+    <section className="mt-5 rounded-[1.75rem] border border-[#2a9d8f]/40 bg-[#0e342f] p-5 shadow-xl">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <h2 className="text-2xl font-black tracking-[-0.05em]">Состояние сервиса</h2>
+        <p className="text-xs font-black tracking-[0.2em] text-[#bff1e8] uppercase">
+          обновление каждые 15 сек
+        </p>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <RuntimeStat title="HLS" value={summary.hls}/>
+        <RuntimeStat title="Nowplaying" value={summary.nowplaying}/>
+        <RuntimeStat title="Queue failed" value={summary.queueFailed}/>
+        <RuntimeStat title="Tracks failed" value={summary.tracksFailed}/>
+        <RuntimeStat title="YouTube API" value={summary.youtube}/>
+      </div>
+    </section>
+  );
+}
+
+function RuntimeStat({title, value}: { title: string; value: string }) {
+  return (
+    <article className="rounded-2xl bg-[#102225] p-3">
+      <p className="text-xs font-black tracking-[0.18em] text-[#e9c46a] uppercase">{title}</p>
+      <p className="mt-2 font-black">{value}</p>
+    </article>
   );
 }
 

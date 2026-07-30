@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Protocol
 
 from manager.config import AppConfig, get_settings
+from manager.health import heartbeat_path, write_heartbeat
 from manager.logger import get_logger
 from manager.playback.telnet import LiquidsoapTelnetClient, LiquidsoapTelnetError
 from manager.track_queue.db import Database
@@ -43,12 +44,15 @@ class QueuePlayer:
         self.log = get_logger("queue-player")
         self._missing_playing_metadata_ticks = 0
         self._missing_queued_request_ticks = 0
+        self.health_path = heartbeat_path(self.config, "queue-player")
 
     async def run_forever(self) -> None:  # pragma: no cover - бесконечный CLI-loop.
         self.database.ensure_schema()
+        write_heartbeat(self.health_path)
         while True:
             try:
                 self.tick()
+                write_heartbeat(self.health_path)
             except Exception as exception:
                 self.log.warning("queue player tick failed", error=str(exception))
             await asyncio.sleep(1)

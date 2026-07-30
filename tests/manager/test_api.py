@@ -196,6 +196,8 @@ def test_health_queue_current_and_admin_enqueue(api_context: tuple[TestClient, D
     health = client.get("/health").json()
     assert health["status"] == "ok"
     assert health["youtube_api"]["status"] == "unknown"
+    assert client.get("/health/live").json() == {"status": "ok"}
+    assert client.get("/health/ready").json()["status"] == "ok"
     assert client.get("/current").json() == {
         "now_playing": {
             "source": None,

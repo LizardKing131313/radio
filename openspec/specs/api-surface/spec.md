@@ -34,6 +34,16 @@ operational metrics.
 - **WHEN** an unauthenticated client requests `/api/metrics`
 - **THEN** the API rejects the request before returning queue or catalog details
 
+#### Scenario: API process is alive
+
+- **WHEN** a client requests `/api/health/live`
+- **THEN** the API returns HTTP 200 without querying PostgreSQL
+
+#### Scenario: API is ready
+
+- **WHEN** a client requests `/api/health/ready`
+- **THEN** the API verifies the database schema and returns HTTP 200 only when ready
+
 ### Requirement: Current playback endpoint
 
 The API SHALL expose the currently audible track estimate using Liquidsoap nowplaying data and the configured HLS live

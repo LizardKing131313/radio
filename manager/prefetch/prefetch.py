@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 from manager.config import AppConfig, get_settings
+from manager.health import heartbeat_path, write_heartbeat
 from manager.logger import get_logger
 from manager.prefetch.data import BlacklistState, Metrics
 from manager.prefetch.utils import SuppressTask, iterate_files, proc_exec, watch_url
@@ -29,14 +30,17 @@ class PrefetchWorker:
         self.queue = QueueRepo(self.database)
         self.metrics = Metrics()
         self.blacklist = BlacklistState.load(self.config.paths.cache_blacklist)
+        self.health_path = heartbeat_path(self.config, "prefetch")
 
     async def run_forever(self) -> None:
         self.database.ensure_schema()
         self._ensure_dirs()
+        write_heartbeat(self.health_path)
 
         while True:
             try:
                 await self.tick()
+                write_heartbeat(self.health_path)
             except Exception as exception:
                 self.log.warning("prefetch tick failed", error=str(exception))
             await asyncio.sleep(max(1, self.config.prefetch.interval_sec))
